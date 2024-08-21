@@ -15,7 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-surveyAnalysis <- function(jaspResults, dataset, options) {
+surveyDescriptives <- function(jaspResults, dataset, options) {
 
   surveyDesign <- setupDesign(jaspResults, dataset, options)
   summaryTable(surveyDesign,  jaspResults, dataset, options)
