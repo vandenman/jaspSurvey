@@ -15,11 +15,15 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+#' @importFrom jaspBase createJaspTable createJaspContainer
+#' createJaspState createJaspPlot
+
+#'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
 
   surveyDesign <- setupDesign(jaspResults, dataset, options)
   summaryTable(surveyDesign,  jaspResults, dataset, options)
-
+  testPlot(jaspResults)
 }
 
 str2formula <- function(x) {
@@ -65,7 +69,7 @@ setupDesign <- function(jaspResults, dataset, options) {
 
 }
 
-summaryTable <- function(jaspResults, dataset, options) {
+summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
 
   if (!is.null(jaspResults[["summaryTable"]]))
     return()
@@ -87,6 +91,25 @@ summaryTable <- function(jaspResults, dataset, options) {
   if (!surveyDesign[["ready"]])
     return()
 
+}
 
+testPlot <- function(jaspResults) {
+
+  if (!is.null(jaspResults[["testPlot"]]))
+    return()
+
+  daxis_name <- parse(text = "italic(M)[diff]")
+
+  set.seed(123)
+  data.frame(wt = rnorm(10), mpg = rnorm(10))
+  myplot <- ggplot2::ggplot(mtcars, ggplot2::aes(wt, mpg)) +
+    ggplot2::geom_point() +
+    ggplot2::scale_y_continuous(
+      sec.axis = ggplot2::sec_axis(transform = identity, name = daxis_name)
+    )
+
+  plot <- createJaspPlot(title = gettext("Test plot"))
+  plot$plotObject <- myplot
+  jaspResults[["testPlot"]] <- plot
 
 }

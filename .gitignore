@@ -60,3 +60,5 @@ Thumbs.db
 
 # temporary Qt files
 *.qml.autosave
+
+_processedLockFile.lock
