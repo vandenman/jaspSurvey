@@ -13,7 +13,18 @@ Description
 	license		: "GPL (>= 2)"
 	icon		: "survey.svg"
 
-	Analysis { title: qsTr("Descriptives");		func:	"surveyDescriptives"	}
-	Analysis { title: qsTr("Analyses");			func:	"surveyAnalyses"		}
+	Analysis
+	{
+	  title: qsTr("Descriptives")
+	  func:	"surveyDescriptives"
+	  preloadData:	true
+	}
+
+	Analysis
+	{
+	  title: qsTr("Analyses")
+	  func:	"surveyAnalyses"
+	  preloadData:	true
+	}
 
 }

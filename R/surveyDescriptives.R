@@ -144,6 +144,7 @@ designTable <- function(surveyDesign, jaspResults, options) {
   fmt <- getDesignTypeFmt(isIndependent, hasStrata, withReplacement)
   designTable[["type"]] <- if (isIndependent) fmt else sprintf(fmt, noLevels, noClusters)
 
+  jaspResults[["summaryTable"]] <- designTable
   if (!isReady(surveyDesign))
     return()
 
@@ -157,6 +158,23 @@ summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
   table <- createJaspTable(title = gettext("Summary statistics"))
   table$addColumnInfo(name = "Variable", title = "", type = "string")
 
+  meanEsts <- survey::svymean(variables, dataDesign)
+  meanCIs  <- stats::confint(meanEsts, level = 0.95)
+
+  meanEstsMat <- as.array(meanEsts)
+  meanCIsMat  <- as.array(meanCIs)
+  tableDf <- data.frame(
+    var   = options[["variables"]],
+    mean  = stats::coef(meanEsts),
+    se    = survey::SE(meanEsts)
+  )
+
+  if (options[["confidenceInterval"]]) {
+    meanCIs  <- stats::confint(meanEsts, level = options[["confidenceIntervalLevel"]])
+    tableDf[["lower"]] <- meanCIsMat[, 1]
+    tableDf[["upper"]] <- meanCIsMat[, 2]
+  }
+
   # if (wantsSplit) {
   #   stats$transposeWithOvertitle <- TRUE
   #   stats$addColumnInfo(name = "Variable", title = "", type = "string")
@@ -165,6 +183,7 @@ summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
   #   stats$addColumnInfo(name = "Variable", title = "", type = "string")
   # }
 
+  table$setData(tableDf)
 
   jaspResults[["summaryTable"]] <- table
 
