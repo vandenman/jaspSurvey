@@ -21,7 +21,6 @@
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
 
-
   surveyDesign <- setupDesign(jaspResults, dataset, options)
 
   designTable(surveyDesign, jaspResults, options)
