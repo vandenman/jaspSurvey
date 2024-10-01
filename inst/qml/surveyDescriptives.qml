@@ -50,6 +50,8 @@ Form
 		AssignedVariablesList	{ name: "weights";			title: qsTr("Weights");		info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["nominal"]; minLevels: 2; maxLevels: 256 } // without maxLevels entering a continuous variable can freeze/ crash jasp, so we need an arbitrary maximum
 		AssignedVariablesList	{ name: "strata";			title: qsTr("Strata");		info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["nominal"]; minLevels: 2; maxLevels: 256 }
 		AssignedVariablesList	{ name: "id";				title: qsTr("Id");			info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["nominal"]; minLevels: 2; maxLevels: 256 }
+
+		AssignedVariablesList	{ name: "splitBy";				title: qsTr("Split");			info: qsTr("Can be split by a categorical variables such as experimental condition.") ; singleVariable: false; allowedColumns: ["nominal"]; minLevels: 2; maxLevels: 256 }
 	}
 
 	CheckBox
@@ -58,5 +60,67 @@ Form
 		label	: qsTr("Transpose descriptives table")
 		info	: qsTr("Tranposes the main table")
 		checked	: false
+	}
+
+	Section
+	{
+		title: qsTr("Statistics")
+
+		Group
+		{
+			title: qsTr("Sample size")
+			CheckBox { name: "valid";			label: qsTr("Valid");	checked: true	}
+			CheckBox { name: "missing";			label: qsTr("Missing");	checked: true	}
+		}
+
+		Group
+		{
+			title:	qsTr("Quantiles")
+			info:	qsTr("Percentile Values")
+
+			CheckBox { name: "quartiles";	label: qsTr("Quartiles"); info: qsTr("Displays the 25th, 50th, and 75th percentiles of the data points.") }
+			CheckBox
+			{
+				name:				"quantilesForEqualGroups"; label: qsTr("Cut points for: ")
+				infoLabel:			qsTr("Cut points for x equal groups")
+				info:				qsTr("Displays the cut points that divide the data into x equal groups; default is 4 equal groups.")
+				childrenOnSameRow:	true
+
+				IntegerField
+				{
+					name:			"quantilesForEqualGroupsNumber"
+					min:			2
+					max:			1000
+					defaultValue:	4
+					afterLabel:		qsTr(" equal groups")
+				}
+			}
+
+			// CheckBox
+			// {
+			// 	name:				"percentiles"
+			// 	label:				qsTr("Percentiles:")
+			// 	info:				qsTr("Displays the xth percentile; percentile values must be separated by comma.")
+			// 	childrenOnSameRow:	true
+
+			// 	TextField
+			// 	{
+			// 		inputType:	"doubleArray"
+			// 		name:		"percentileValues"
+			// 		fieldWidth: 60
+			// 	}
+			// }
+		}
+
+		Group
+		{
+			title: qsTr("Central tendency")
+			infoLabel: qsTr("Central Tendency (only for continuous variables)")
+
+			CheckBox { name: "mode";			label: qsTr("Mode");	info: qsTr("Mode of the data points; if more than one mode exists, only the first is reported. For nominal and ordinal data, the mode is the most frequent observed value. For continuous data, the mode is the value with highest density estimate (see 'Distribution Plots' -> 'Display density'). If a footnote about multimodality for continuous variables is reported, we recommend visualizing the data to check for multimodality.")	}
+			CheckBox { name: "median";			label: qsTr("Median");	info: qsTr("Median of the data points.")					}
+			CheckBox { name: "mean";			label: qsTr("Mean");	info: qsTr("Arithmetic mean of the data points") ;	checked: true	}
+		}
+
 	}
 }
