@@ -23,15 +23,20 @@ options <- list(
     # "hsg", "some.col", "col.grad", "grad.sch", "avg.ed", "full",
     # "emer", "enroll", "api.stu"
   ),
+  split = "stype",
 
+  # statistics, missing svyquantile
   mean = TRUE,
   var  = TRUE,
   total = TRUE,
+
+  # uncertainty, missing vcov, see ?survey::svyvar
+  # should use vcov, SE, coef, confint, svycontrast as extractors
+  # also add cvpct
   ci = TRUE,
   ciLevel = .95,
   se = TRUE,
-  cv = TRUE,
-  split = "stype"
+  cv = TRUE
 )
 
 
@@ -57,72 +62,63 @@ dataDesign <- survey::svydesign(
   fpc       = fpc,
   data      = dataset
 )
-svyby(~api99, ~stype, dataDesign, svymean)
 
-dclus1<-svydesign(id=~dnum, weights=~pw, data=dataset, fpc=~fpc)
-svyby(~api99, ~stype, dclus1, svymean)
+survey::svyby(api99 ~stype, dataDesign, survey::svymean, keep.var=FALSE)
 
+graphics.off(); dev.cur()
+aa <- survey::svyboxplot(api99 ~stype, dataDesign, plot = FALSE)
+survey:::svyboxplot.default
+dev.cur()
 
-hasSplit <- !is.null(options[["split"]])
-if (hasSplit) {
+# dclus1<-svydesign(id=~dnum, weights=~pw, data=apiclus1, fpc=~fpc)
+# svyby(~api99, ~stype, dclus1, svyquantile, quantiles=0.5, keep.var=FALSE, multicore = FALSE)
 
-  vartype <- c()
-  if (options[["ci"]])    vartype <- c(vartype, "ci")
-  if (options[["se"]])    vartype <- c(vartype, "se")
-  if (options[["cv"]])    vartype <- c(vartype, "cv")
-  if (options[["var"]])   vartype <- c(vartype, "var")
-  # if (options[["cvpct"]]) vartype <- c(vartype, "cvpct")
-  ciLevel <- options[["ciLevel"]]
-
-  splitFormula <- str2formula(options[["split"]])
-  tableDf <- list(
-    mean  = survey::svyby(variables, splitFormula, design = dataDesign, survey::svymean, vartype  = vartype, level = ciLevel),
-    total = survey::svyby(variables, splitFormula, design = dataDesign, survey::svytotal, vartype = vartype, level = ciLevel)
-  )
-
-  survey::svyby(variables, splitFormula, design = dataDesign, survey::svyquantile, quantiles=c(.1, 0.5, .9), vartype = vartype, level = ciLevel)
-  survey::svyby(variables, splitFormula, design = dataDesign, survey::svyquantile, quantiles=.5, vartype = vartype, level = ciLevel)
-
-  # these things can fail!
-  svyby(~target, ~stype, dataDesign, svyquantile, quantiles=c(.1, 0.5, .9))
-  # but it can also be fixed
-  svyby(~target, ~stype, dataDesign, svyquantile, quantiles=c(.1, 0.5, .9), na.rm = TRUE)
-  # only some quantiles are unavailable? that's... odd
-  svyby(~growth, ~stype, dataDesign, svyquantile, quantiles=c(.1, 0.5, .9), na.rm = TRUE)
-
-
-  # format is
-  # colname      for coef
-  # se.colname   for se
-  # ci_l.colname for lower ci
-  # ci_u.colname for upper ci
-  # cv.colname   for coefficient of variation
-  # var.colname  for variance
-  # cv%          for coefficient of variation in percentage (?)
-
-
-} else {
+computeSummaryTables <- function(dataDesign, options) {
 
   stats <- list(
-    list(optionName = "mean",  columnName = "mean",  fun = survey::svymean),
-    list(optionName = "total", columnName = "total", fun = survey::svytotal)#,
-    # list(optionName = "var",   columnName = "var",   fun = survey::svyvar)
+    list(optionName = "mean",     columnName = "mean",     fun = survey::svymean),
+    list(optionName = "total",    columnName = "total",    fun = survey::svytotal)#,
+    # list(optionName = "var",      columnName = "var",      fun = survey::svyvar),
+    # list(optionName = "quantile", columnName = "quantile", fun = survey::svyquantile)
   )
 
   varStats <- list(
-    list(optionName = "se", fun = \(x) data.frame(se = survey::SE(x))),
-    list(optionName = "cv", fun = \(x) data.frame(cv = survey::cv(x))),
+    list(optionName = "se", fun = \(x) data.frame(se = unlist(survey::SE(x), use.names = FALSE))),
+    list(optionName = "cv", fun = \(x) data.frame(cv = unlist(survey::cv(x), use.names = FALSE))),
     list(optionName = "ci", fun = \(x) stats::setNames(as.data.frame(stats::confint(x, level = options[["ciLevel"]])), c("lower", "upper")))
   )
+
+  variables <- str2formula(options[["variables"]])
+
+  hasSplit <- !is.null(options[["split"]])
+  hasSplit <- FALSE
+  executor <- if (hasSplit) {
+    function(f) survey::svyby(variables, splitFormula, design = dataDesign, f)
+  } else {
+    function(f) f(variables, dataDesign)
+  }
+  splitFormula <- str2formula(options[["split"]])
 
   tableDf <- list()
   for (i in seq_along(stats)) {
     si <- stats[[i]]
     if (options[[si[["optionName"]]]]) {
 
-      sv <- si[["fun"]](variables, dataDesign)
-      df <- data.frame(a = coef(sv))
-      colnames(df) <- si[["columnName"]]
+      sv <- executor(si[["fun"]])
+      if (hasSplit) {
+
+        variableNms <- colnames(sv)[seq_along(options[["variables"]]) + 1]
+        splitNms    <- rownames(sv)
+        df <- data.frame(
+          variable = rep(variableNms, each = length(splitNms)),
+          split    = splitNms,
+          a        = coef(sv)
+        )
+        colnames(df)[3] <- si[["columnName"]]
+      } else {
+        df <- data.frame(variable = names(sv), a = coef(sv))
+        colnames(df)[2] <- si[["columnName"]]
+      }
 
       if (si[["optionName"]] != "var") { # does not work well for variances
         for (j in seq_along(varStats)) {
@@ -139,6 +135,196 @@ if (hasSplit) {
 
     }
   }
+
+}
+  for (optionName in c("mean", "total", "var")) {
+    if (options[[optionName]])
+      tableDf[[optionName]] <- cbind(variable = rownames(df), tableDf[[optionName]])
+  }
+
+  hasSplit <- !is.null(options[["split"]])
+  if (hasSplit) {
+
+    stats <- list(
+      list(optionName = "mean",     columnName = "mean",     fun = survey::svymean),
+      list(optionName = "total",    columnName = "total",    fun = survey::svytotal)#,
+      # list(optionName = "var",      columnName = "var",      fun = survey::svyvar),
+      # list(optionName = "quantile", columnName = "quantile", fun = survey::svyquantile)
+    )
+
+    varStats <- list(
+      list(optionName = "se", fun = \(x) data.frame(se = unlist(survey::SE(x), use.names = FALSE))),
+      list(optionName = "cv", fun = \(x) data.frame(cv = unlist(survey::cv(x), use.names = FALSE))),
+      list(optionName = "ci", fun = \(x) stats::setNames(as.data.frame(stats::confint(x, level = options[["ciLevel"]])), c("lower", "upper")))
+    )
+
+    tableDf <- list()
+    for (i in seq_along(stats)) {
+      si <- stats[[i]]
+      if (options[[si[["optionName"]]]]) {
+
+        sv <- survey::svyby(variables, splitFormula, design = dataDesign, si[["fun"]])
+        if (split )
+        df <- data.frame(a = coef(sv))
+        colnames(df) <- si[["columnName"]]
+
+        if (si[["optionName"]] != "var") { # does not work well for variances
+          for (j in seq_along(varStats)) {
+            vsj <- varStats[[j]]
+            if (options[[vsj[["optionName"]]]]) {
+
+              df <- cbind(df, vsj[["fun"]](sv))
+
+            }
+          }
+        }
+
+        tableDf[[si[["optionName"]]]] <- df
+
+      }
+    }
+
+    for (optionName in c("mean", "total", "var")) {
+      if (options[[optionName]])
+        tableDf[[optionName]] <- cbind(variable = rownames(df), tableDf[[optionName]])
+    }
+
+
+    vartype <- c()
+    colTitles <- c()
+    colNames  <- c()
+    if (options[["ci"]])  {  vartype <- c(vartype, "ci" ); colNames <- c(colNames, "lower", "upper"); colTitles <- c(colTitles, "lower ci", "upper ci")   }
+    if (options[["se"]])  {  vartype <- c(vartype, "se" ); colNames <- c(colNames, "se");             colTitles <- c(colTitles, "SE")   }
+    if (options[["cv"]])  {  vartype <- c(vartype, "cv" ); colNames <- c(colNames, "cv");             colTitles <- c(colTitles, "Coefficient of Variation")   }
+    if (options[["var"]]) {  vartype <- c(vartype, "var"); colNames <- c(colNames, "var");            colTitles <- c(colTitles, "Variance")   }
+    # if (options[["cvpct"]]) vartype <- c(vartype, "cvpct")
+    ciLevel <- options[["ciLevel"]]
+
+    splitFormula <- str2formula(options[["split"]])
+    tableDf <- list(
+      mean  = survey::svyby(variables, splitFormula, design = dataDesign, survey::svymean,  vartype = vartype, level = ciLevel),
+      total = survey::svyby(variables, splitFormula, design = dataDesign, survey::svytotal, vartype = vartype, level = ciLevel),
+      var   = survey::svyby(variables, splitFormula, design = dataDesign, survey::svyvar,   vartype = vartype, level = ciLevel)
+    )
+
+    cnms <- colnames(tableDf[[1]])
+    nvar <- length(options[["variables"]])
+    noRows <- nrow(tableDf[[1]])
+    totalMat <- meanMat <- as.data.frame(matrix(NA, nrow = nrow(tableDf[[1]]) * nvar, ncol = 3 + length(colTitles),
+                                                dimnames = list(NULL, c("variable", "split", "mean", colNames))))
+    colnames(totalMat)[3] <- "total"
+
+
+    totalMat[["split"]]    <- meanMat[["spit"]]     <- rep(tableDf[[1]][[1]], nvar)
+    totalMat[["variable"]] <- meanMat[["variable"]] <- rep(options[["variables"]], each = noRows)
+
+    rowStart <- 1
+    for (i in seq_along(options[["variables"]])) {
+
+      colIdx <- which(endsWith(cnms, options[["variables"]][i]))
+      rowIdx <- rowStart:(rowStart + noRows - 1)
+      newColIdx <- gsub(pattern = paste0(".", options[["variables"]][i]), replacement = "", x = colnames(tableDf[[1]])[colIdx])
+      newColIdx[1] <- "mean"
+      meanMat[rowIdx, newColIdx] <- (tableDf[["mean"]][, colIdx, drop = FALSE])
+      newColIdx[1] <- "total"
+      totalMat[rowIdx, newColIdx] <- tableDf[["total"]][, colIdx, drop = FALSE]
+
+      rowStart <- rowStart + noRows
+
+    }
+
+    sv <- survey::svyby(variables, splitFormula, design = dataDesign, si[["fun"]])
+
+    # could do the above more generically using try-catch or a fallback
+    survey::svyby(variables, splitFormula, design = dataDesign, survey::svyquantile, quantiles=0.5, na.rm = TRUE, vartype = vartype, level = ciLevel)    survey::svyby(~cnum, splitFormula, design = dataDesign, survey::svyquantile, quantiles=0.5, vartype = vartype, level = ciLevel)
+    debugonce(survey::svyquantile)
+
+    survey::svyby(~flag, splitFormula, design = dataDesign, survey::svyquantile, quantiles=0.5, na.rm = TRUE, vartype = vartype, level = ciLevel)
+
+    survey::svyby(~cnum + flag, splitFormula, design = dataDesign, survey::svyvar, na.rm = TRUE, vartype = vartype, level = ciLevel)
+    survey::svyby(~flag, splitFormula, design = dataDesign, survey::svyvar, na.rm = TRUE, vartype = vartype, level = ciLevel)
+
+    survey::svyby(~cnum, splitFormula, design = dataDesign, survey::svymean,  vartype = vartype, level = ciLevel)
+    survey::svyvar(~cnum, design = dataDesign)
+    survey::svyby(~cnum + api99, splitFormula, design = dataDesign, survey::svymean, vartype = vartype, level = ciLevel)
+    survey::svyby(~cnum + api99, splitFormula, design = dataDesign, survey::svyvar,  vartype = vartype, level = ciLevel)
+
+    survey::SE(survey::svyvar(~cnum + flag, design = dataDesign, na.rm = TRUE))
+    survey::cv(survey::svyvar(~cnum + flag, design = dataDesign, na.rm = TRUE))
+    survey::cv(survey::svyvar(~cnum + api99, design = dataDesign, na.rm = TRUE))
+    survey::SE(survey::svyvar(~cnum + api99, design = dataDesign, na.rm = TRUE))
+    survey::SE(survey::svyby(variables, splitFormula, design = dataDesign, survey::svymean,  vartype = vartype, level = ciLevel))
+    survey::var(survey::svyby(variables, splitFormula, design = dataDesign, survey::svymean,  vartype = vartype, level = ciLevel))
+
+    confint(survey::svyvar(~cnum + flag, design = dataDesign))
+    confint(survey::svyvar(~cnum + api99, design = dataDesign))
+    vcov(survey::svyvar(~cnum + api99, design = dataDesign))
+    survey::SE(survey::svyvar(~cnum + api99, design = dataDesign))
+
+    confint(survey::svyquantile(~cnum + api99, design = dataDesign))
+
+
+
+
+    # format is
+    # colname      for coef
+    # se.colname   for se
+    # ci_l.colname for lower ci
+    # ci_u.colname for upper ci
+    # cv.colname   for coefficient of variation
+    # var.colname  for variance
+    # cv%          for coefficient of variation in percentage (?)
+
+
+  } else {
+
+    stats <- list(
+      list(optionName = "mean",     columnName = "mean",  fun = survey::svymean),
+      list(optionName = "total",    columnName = "total", fun = survey::svytotal),
+      list(optionName = "var",      columnName = "var",   fun = survey::svyvar),
+      list(optionName = "quantile", columnName = "var",   fun = survey::svyquantile)
+    )
+
+    varStats <- list(
+      list(optionName = "se", fun = \(x) data.frame(se = survey::SE(x))),
+      list(optionName = "cv", fun = \(x) data.frame(cv = survey::cv(x))),
+      list(optionName = "ci", fun = \(x) stats::setNames(as.data.frame(stats::confint(x, level = options[["ciLevel"]])), c("lower", "upper")))
+    )
+
+    tableDf <- list()
+    for (i in seq_along(stats)) {
+      si <- stats[[i]]
+      if (options[[si[["optionName"]]]]) {
+
+        sv <- si[["fun"]](variables, dataDesign)
+        df <- data.frame(a = coef(sv))
+        colnames(df) <- si[["columnName"]]
+
+        if (si[["optionName"]] != "var") { # does not work well for variances
+          for (j in seq_along(varStats)) {
+            vsj <- varStats[[j]]
+            if (options[[vsj[["optionName"]]]]) {
+
+              df <- cbind(df, vsj[["fun"]](sv))
+
+            }
+          }
+        }
+
+        tableDf[[si[["optionName"]]]] <- df
+
+      }
+    }
+
+    for (optionName in c("mean", "total", "var")) {
+      if (options[[optionName]])
+        tableDf[[optionName]] <- cbind(variable = rownames(df), tableDf[[optionName]])
+    }
+
+  }
+  return(tableDf)
+
+}
 
 
   setNames(as.data.frame(stats::confint(meanEsts)), c("lower", "upper"))
