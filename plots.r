@@ -2,14 +2,95 @@
 # do we want the hexbin version?
 # legend?
 
+library(survey)
+renv::install("~/github/jasp/jasp-desktop/Engine/jaspGraphs", prompt = FALSE)
+
+ggSvyHist <- function(xName, design, binWidthType = "doane", numberOfBins = NA,
+                      density = FALSE) {
+
+
+  mf <- stats::model.frame(stats::as.formula(paste("~", xName)), stats::model.frame(design))
+  x <- mf[, 1]
+
+  binWidthType <- jaspGraphs::jaspHistogramBinWidth(x, binWidthType, numberOfBins)
+
+  h <- graphics::hist(x, plot = FALSE, breaks = binWidthType)
+  # plot(h)
+
+
+  props <- unname(stats::coef(survey::svymean(~cut(x, h[["breaks"]], right = TRUE, include.lowest = TRUE), design, na.rm = TRUE)))
+  h[["density"]] <- props / diff(h[["breaks"]])
+  h[["counts"]]  <- props * sum(stats::weights(design, "sampling"))
+
+  yKey  <- if (density) "density" else "counts"
+  yName <- if (density) gettext("Density") else gettext("Counts")
+
+
+  yhigh <- max(h[[yKey]])
+  xBreaks <- jaspGraphs::getPrettyAxisBreaks(c(x, h[["breaks"]]), min.n = 3)
+  yBreaks <- jaspGraphs::getPrettyAxisBreaks(c(0, yhigh))
+
+  data.frame(
+    x = h[["mids"]],
+    y = h[[yKey]]
+  ) |>
+    # subset(y != 0) |>
+    ggplot2::ggplot(
+    mapping = ggplot2::aes(x = x, y = y)
+    ) +
+    ggplot2::geom_col(
+      col      = "black",
+      fill     = "grey75",
+      linewidth = 0.7,
+      width    = diff(h[["breaks"]])[1]
+    ) +
+
+    ggplot2::scale_x_continuous(name = xName, breaks = xBreaks, limits = range(xBreaks)) +
+    ggplot2::scale_y_continuous(name = yName, breaks = yBreaks, limits = range(yBreaks)) +
+
+    jaspGraphs::geom_rangeframe() +
+    jaspGraphs::themeJaspRaw()
+
+}
+
+
 data(api)
 dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat,
                     fpc = ~fpc)
-opar<-par(mfrow=c(1,3))
+
+xName <- "enroll"
+design <- dstrat
+
+mf <- model.frame(as.formula(paste("~",xName)), model.frame(design))
+x <- mf[, 1]
+
+k <- jaspGraphs::jaspHistogramBinWidth(x, "doane", 0)
+hist(apistrat$enroll, main="Sample unweighted",col="purple",prob=TRUE,
+     breaks = k, probability = FALSE)
+
+svyhist(~enroll, dstrat, main="Survey weighted",col="purple",
+        breaks = k, probability = FALSE)
+
+ggplot2::GeomBar$draw_panel
+ggplot2::GeomCol$draw_panel
+
+ggSvyHist("enroll", design)
+jaspGraphs::jaspHistogram(x, "enroll")
+
+
+data(api)
+dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat,
+                    fpc = ~fpc)
 svyhist(~enroll, dstrat, main="Survey weighted",col="purple",ylim=c(0,1.3e-3))
+
+
+opar<-par(mfrow=c(1,3))
 hist(apistrat$enroll, main="Sample unweighted",col="purple",prob=TRUE,ylim=c(0,1.3e-3))
 hist(apipop$enroll, main="Population",col="purple",prob=TRUE,ylim=c(0,1.3e-3))
 par(mfrow=c(1,1))
+
+svyhist(~enroll, dstrat, main="Survey weighted",col="purple",ylim=c(0,1.3e-3), plot = FALSE)
+
 svyboxplot(enroll~stype,dstrat,all.outliers=TRUE)
 svyboxplot(enroll~1,dstrat)
 par(opar)
@@ -49,9 +130,8 @@ grid.polyline(s$api99$x,s$api99$y,vp=h$plot.vp@hexVp.on,default.units="native",
               gp=gpar(col="red",lwd=2))
 
 library(survey)
-data(api)
-dclus2<-svydesign(id=~dnum+snum, weights=~pw,
-                  data=apiclus2, fpc=~fpc1+fpc2)
+data(api, package = "survey")
+dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
 svycoplot(api00~api99|sch.wide*comp.imp, design=dclus2, style="hexbin")
 svycoplot(api00~api99|sch.wide*comp.imp, design=dclus2, style="hexbin", hexscale="absolute")
 svycoplot(api00~api99|sch.wide, design=dclus2, style="trans")
@@ -96,18 +176,21 @@ ggplot2::ggplot(
   jaspGraphs::geom_rangeframe() +
   jaspGraphs::themeJaspRaw()
 
-scatterPlotDesign <- function(x, y, splitVars, design) {
+scatterPlotDesign <- function(design, x, y, splitVars = NULL,
+                              splitMethod = c("facet", "group"),
+                              minAlpha = .2, maxAlpha = 1.) {
 
-  basecol=function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)]
-  transcol<-function(base,opacity){
+  splitMethod <- match.arg(splitMethod)
+
+  # TODO: use jasp colors
+  basecol = function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)]
+  transcol <- function(base,opacity){
     rgbs<-col2rgb(base)/255
     rgb(rgbs[1,],rgbs[2,], rgbs[3,], alpha=opacity)
   }
-  if(is.function(basecol)) basecol<-basecol(model.frame(design))
+  if(is.function(basecol)) basecol <- basecol(model.frame(design))
 
-  facet <- if (isEmpty(splitVars))
-    NULL
-  else ggplot2::facet_wrap(str2formula(splitVars))
+
 
   wt <- weights(design,"sampling")
   df <- model.frame(design)
@@ -115,17 +198,24 @@ scatterPlotDesign <- function(x, y, splitVars, design) {
   # normalize colros
   maxw   <- max(wt)
   minw   <- 0
-  alpha  <- c(0, 1) # TODO: user specified
+  alpha  <- c(minAlpha, maxAlpha)
   alphas <- (alpha[1] * (maxw - wt) + alpha[2] * (wt - minw)) / (maxw - minw)
   cols   <- transcol(basecol,alphas)
 
   xvar <- ggplot2::sym(x)
   yvar <- ggplot2::sym(y)
+
+  mapping <- ggplot2::aes(x = !!xvar, y = !!yvar)
+  facet <- NULL
+  if (!isEmpty(splitVars) && splitMethod == "facet")
+    facet <- ggplot2::facet_wrap(str2formula(splitVars))
+
   df$color <- cols
   df$awards <- factor(df$awards, levels = c("Yes", "No"))
   ggplot2::ggplot(
     data = df,
-    ggplot2::aes(x = !!xvar, y = !!yvar)) +
+    mapping
+  ) +
     ggplot2::geom_point(color = cols, fill = cols) +
     facet +
     # ggplot2::facet_grid(cols=ggplot2::vars(stype), rows = ggplot2::vars(awards)) +
@@ -134,8 +224,14 @@ scatterPlotDesign <- function(x, y, splitVars, design) {
 
 }
 
+debugonce(scatterPlotDesign)
+scatterPlotDesign("meals", "api00", design = dclus2)
 scatterPlotDesign("meals", "api00", "stype", dclus2)
+scatterPlotDesign("meals", "api00", c("stype", "awards"), dclus2)
 
+
+scatterPlotDesign("meals", "api00", "stype", dclus2, splitMethod = "group",
+                  minAlpha = .4)
 svycoplot(api00~meals|stype,design=dclus2,
           style="transparent",
           basecol=function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)],

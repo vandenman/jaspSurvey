@@ -16,7 +16,7 @@
 #
 
 #' @importFrom jaspBase createJaspTable createJaspContainer
-#' createJaspState createJaspPlot
+#' createJaspState createJaspPlot jaspDeps
 
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
@@ -30,7 +30,8 @@ surveyDescriptives <- function(jaspResults, dataset, options) {
 
   designTable(surveyDesign, jaspResults, options)
   summaryTable(surveyDesign,  jaspResults, dataset, options)
-  testPlot(jaspResults)
+  histogramPlot(surveyDesign, jaspResults, dataset, options)
+
 }
 
 setupDesign <- function(jaspResults, dataset, options) {
@@ -38,7 +39,7 @@ setupDesign <- function(jaspResults, dataset, options) {
   ready <- !(isEmpty(options[["variables"]]) || isEmpty(options[["weights"]]))
   print(sprintf("R says: ready: %s", ready))
 
-  jaspResults$dependOn(c("variables", "weights", "probs", "hasWeights", "strata"))
+  jaspResults$dependOn(designDependencies())
 
   if (!ready)
     return(list(design = NULL, ready = FALSE))
@@ -273,7 +274,6 @@ computeSummaryTables <- function(design, options) {
   return(tableDf)
 }
 
-
 fillSummaryTable <- function(table, surveyDesign, dataset, options) {
 
   split <- hasSplit(options)
@@ -355,26 +355,209 @@ fillSummaryTable <- function(table, surveyDesign, dataset, options) {
   }
 }
 
-testPlot <- function(jaspResults) {
+ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
+                      density = FALSE, xBreaks = NULL, yBreaks = NULL,
+                      addRangeFrame = TRUE) {
 
-  if (!is.null(jaspResults[["testPlot"]]))
-    return()
 
-  daxis_name <- parse(text = "italic(M)[diff]")
+  mf <- stats::model.frame(stats::as.formula(paste("~", xName)), stats::model.frame(design))
+  x <- mf[, 1]
 
-  set.seed(123)
-  data.frame(wt = rnorm(10), mpg = rnorm(10))
-  myplot <- ggplot2::ggplot(mtcars, ggplot2::aes(wt, mpg)) +
-    ggplot2::geom_point() +
-    ggplot2::scale_y_continuous(
-      sec.axis = ggplot2::sec_axis(transform = identity, name = daxis_name)
-    )
+  binWidthType <- jaspGraphs::jaspHistogramBinWidth(x, binWidthType, numberOfBins)
 
-  plot <- createJaspPlot(title = gettext("Test plot"))
-  plot$plotObject <- myplot
-  jaspResults[["testPlot"]] <- plot
+  h <- graphics::hist(x, plot = FALSE, breaks = binWidthType)
+
+  props <- unname(stats::coef(survey::svymean(~cut(x, h[["breaks"]], right = TRUE, include.lowest = TRUE), design, na.rm = TRUE)))
+  h[["density"]] <- props / diff(h[["breaks"]])
+  h[["counts"]]  <- props * sum(stats::weights(design, "sampling"))
+
+  yKey  <- if (density) "density" else "counts"
+  yName <- if (density) gettext("Density") else gettext("Counts")
+
+
+  yhigh <- max(h[[yKey]])
+  xBreaks <- xBreaks %||% jaspGraphs::getPrettyAxisBreaks(c(x, h[["breaks"]]), min.n = 3)
+  yBreaks <- yBreaks %||% jaspGraphs::getPrettyAxisBreaks(c(0, yhigh))
+
+  frame <- if (addRangeFrame) jaspGraphs::geom_rangeframe() else NULL
+
+  data.frame(
+    x = h[["mids"]],
+    y = h[[yKey]]
+  ) |>
+    # subset(y != 0) |>
+    ggplot2::ggplot(
+      mapping = ggplot2::aes(x = x, y = y)
+    ) +
+    ggplot2::geom_col(
+      col      = "black",
+      fill     = "grey75",
+      linewidth = 0.7,
+      width    = diff(h[["breaks"]])[1]
+    ) +
+
+    ggplot2::scale_x_continuous(name = xName, breaks = xBreaks, limits = range(xBreaks)) +
+    ggplot2::scale_y_continuous(name = yName, breaks = yBreaks, limits = range(yBreaks)) +
+
+    frame +
+    jaspGraphs::themeJaspRaw()
 
 }
+
+scatterPlotDesign <- function(design, x, y, splitVars = NULL,
+                              splitMethod = c("facet", "group"),
+                              mapWeightsToAlpha = TRUE,
+                              minAlpha = .2, maxAlpha = 1.,
+                              mapWeightsToSize = FALSE,
+                              minSize = 1, maxSize = 6,
+                              xBreaks = NULL, yBreaks = NULL
+                              ) {
+
+  splitMethod <- match.arg(splitMethod)
+
+  # normalize colors
+  # wt <- unname(stats::weights(design, "sampling"))
+  # maxw   <- max(wt)
+  # minw   <- 0
+  # alpha  <- c(minAlpha, maxAlpha)
+  # alphas <- (alpha[1] * (maxw - wt) + alpha[2] * (wt - minw)) / (maxw - minw)
+  # cols   <- transcol(basecol, alphas)
+
+  facet <- NULL
+  if (!isEmpty(splitVars) && splitMethod == "facet")
+    facet <- ggplot2::facet_wrap(str2formula(splitVars))
+
+  df <- stats::model.frame(design)
+  # these names should be unique w.r.t x & y
+  # df$color <- cols
+  df$weights <- unname(stats::weights(design, "sampling"))
+
+  # xvar <- ggplot2::sym(x)
+  # yvar <- ggplot2::sym(y)
+  mapping <- ggplot2::aes()
+  mapping$x <- ggplot2::sym(x)
+  mapping$y <- ggplot2::sym(y)
+
+  colorScale <- fillScale <- NULL
+  if (!isEmpty(splitVars)) {
+    colorvar <-
+      if (length(splitVars) == 1) rlang::sym(splitVars)
+      else                        rlang::call2(quote(interaction), !!!lapply(splitVars, rlang::sym))
+
+    mapping$color <- colorvar
+    mapping$fill  <- colorvar
+    colorScale <- jaspGraphs::scale_JASPcolor_discrete()
+    fillScale  <- jaspGraphs::scale_JASPfill_discrete()
+  }
+
+  alphaScale <- NULL
+  if (mapWeightsToAlpha) {
+    mapping$alpha <- quote(weights)
+    alphaScale <- ggplot2::scale_alpha(range = c(minAlpha, maxAlpha))
+  }
+
+  sizeScale <- NULL
+  if (mapWeightsToSize) {
+    mapping$size <- quote(weights)
+    sizeScale <- ggplot2::scale_size_binned(range = c(minSize, maxSize))
+  }
+
+  xBreaks <- xBreaks %||% jaspGraphs::getPrettyAxisBreaks(df[[x]])
+  yBreaks <- yBreaks %||% jaspGraphs::getPrettyAxisBreaks(df[[y]])
+
+  # what if noncontinuous scale?
+  scale_x <- ggplot2::scale_x_continuous(name = x, breaks = xBreaks, limits = range(xBreaks))
+  scale_y <- ggplot2::scale_y_continuous(name = y, breaks = yBreaks, limits = range(yBreaks))
+
+  ggplot2::ggplot(data = df, mapping) +
+    ggplot2::geom_point() +
+    alphaScale + sizeScale + colorScale + fillScale +
+    scale_x + scale_y +
+    facet +
+    jaspGraphs::geom_rangeframe() +
+    ggplot2::labs(color = NULL, fill = NULL) +
+    jaspGraphs::themeJaspRaw(legend.position = "right")
+
+}
+
+data(api, package = "survey")
+dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
+scatterPlotDesign(dclus2, "meals", "api00")
+scatterPlotDesign(dclus2, "meals", "api00", "stype")
+scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group")
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
+                  minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "group",
+                  minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
+                  minAlpha = .25, maxAlpha = 1.0, mapWeightsToSize = TRUE)
+
+
+
+# setup for a customizable scatter plot
+df <- model.frame(dclus2)
+xBreaks <- jaspGraphs::getPrettyAxisBreaks(df$meals)
+yBreaks <- jaspGraphs::getPrettyAxisBreaks(df$api00)
+pScatter <- scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group", xBreaks = xBreaks, yBreaks = yBreaks)
+pHistTop   <- ggSvyHist(dclus2, "meals", xBreaks = xBreaks, addRangeFrame = FALSE) + ggplot2::theme_void()
+pHistRight <- ggSvyHist(dclus2, "api00", xBreaks = yBreaks, addRangeFrame = FALSE) + ggplot2::theme_void() + ggplot2::coord_flip()
+
+# debug_x_thm <- ggplot2::theme(
+#   axis.line.x = ggplot2::element_line(),
+#   axis.ticks.x = ggplot2::element_line(),
+#   axis.ticks.length.x = ggplot2::unit(3, "points"),
+#   axis.text.x = ggplot2::element_text()
+# )
+# debug_y_thm <- ggplot2::theme(
+#   axis.line.y = ggplot2::element_line(),
+#   axis.ticks.y = ggplot2::element_line(),
+#   axis.ticks.length.y = ggplot2::unit(10, "pt"),
+#   axis.text.y = ggplot2::element_text()
+# )
+# pHistTop <- pHistTop + debug_x_thm
+# pHistRight <- pHistRight + debug_y_thm
+
+# layout <- "AAAA#
+#            BBBBC
+#            BBBBC
+#            BBBBC
+#            BBBBC"
+layout <- c(
+  patchwork::area(1, 1, 1, 4),
+  patchwork::area(2, 1, 5, 4),
+  patchwork::area(2, 5, 5, 5)
+)
+# plot(layout)
+pHistTop + pScatter + pHistRight +
+  patchwork::plot_layout(
+    axes    = "collect",
+    guides  = "collect",
+    design  = layout
+)
+
+histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
+
+  if (!options[["distributionPlots"]])
+    return()
+
+  histogramContainer <- jaspResults[["histogramPlotContainer"]] %setOrRetrieve%
+    createJaspContainer(title = gettext("Histograms"),
+                        dependencies = c("distributionPlots", setdiff(designDependencies(), "variables")))
+
+  for (variable in options[["variables"]]) {
+
+    histogramContainer[[variable]] %setOrRetrieve%
+      createJaspPlot(
+        title        = gettextf("Histogram of %s", variable),
+        plot         = if (isReady(surveyDesign)) ggSvyHist(surveyDesign[["design"]], variable),
+        dependencies = jaspDeps(optionContainsValue = list(variables = variable))
+      )
+
+  }
+
+}
+
+
 
 str2formula <- function(x) {
   isEmpty(x) && return(NULL)
@@ -386,3 +569,7 @@ isEmpty <- function(x) (length(x) == 0L) || (is.character(x) && identical(x, "")
 
 hasWeights <- function(options) return(identical(options[["weightsOrProbs"]], "weights"))
 hasSplit   <- function(options) return(!is.null(options[["split"]]))
+
+designDependencies <- function() {
+  c("variables", "weights", "probs", "hasWeights", "strata")
+}

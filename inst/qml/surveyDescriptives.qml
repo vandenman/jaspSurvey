@@ -98,4 +98,23 @@ Form
 			CheckBox { name: "cv";		label: qsTr("Coefficient of variation");	info: qsTr("Weighted estimate of uncerestimation of the design mean for the selected variables.")						}
 		}
 	}
+
+	Section
+	{
+		title: qsTr("Basic plots")
+		columns: 2
+
+		Group
+		{
+			Row
+			{
+				spacing: jaspTheme.columnGroupSpacing
+				CheckBox
+				{
+					name: "distributionPlots";	label: qsTr("Distribution plots");	id:	distributionPlots
+					info: qsTr("For continuous variables, displays a histogram and the fit of a nonparametric density estimator. For nominal and ordinal variables, displays a frequency distribution.")
+				}
+			}
+		}
+	}
 }
