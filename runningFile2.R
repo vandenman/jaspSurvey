@@ -11,6 +11,8 @@ options <- analysisOptions("surveyDescriptives")
 data(api, package = "survey")
 dataset <- apiclus1
 
+write.csv(apiclus1, "apiclus1.csv", row.names = FALSE)
+
 
 options <- list(
   id         = "dnum",

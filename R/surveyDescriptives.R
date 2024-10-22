@@ -21,6 +21,11 @@
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
 
+  print("R says: options")
+  print(options)
+  print("R says: head(dataset)")
+  print(head(dataset, 10))
+
   surveyDesign <- setupDesign(jaspResults, dataset, options)
 
   designTable(surveyDesign, jaspResults, options)
@@ -28,18 +33,10 @@ surveyDescriptives <- function(jaspResults, dataset, options) {
   testPlot(jaspResults)
 }
 
-str2formula <- function(x) {
-  is.null(x) && return(NULL)
-  (length(x) == 1) && return(as.formula(paste("~", x)))
-  return(as.formula(paste("~", paste(x, collapse = "+"))))
-}
-
 setupDesign <- function(jaspResults, dataset, options) {
 
-  ready <- (length(options[["variables"]]) > 0) && (
-    (options[["hasWeights"]] && length(options[["weights"]]) > 0) ||
-      length(options[["probs"]]) > 0
-  )
+  ready <- !(isEmpty(options[["variables"]]) || isEmpty(options[["weights"]]))
+  print(sprintf("R says: ready: %s", ready))
 
   jaspResults$dependOn(c("variables", "weights", "probs", "hasWeights", "strata"))
 
@@ -48,12 +45,12 @@ setupDesign <- function(jaspResults, dataset, options) {
 
   id      <- str2formula(options[["id"]]) %||% ~0
   strata  <- options[["strata"]]
-  if (options[["hasWeights"]]) {
+  if (hasWeights(options)) {
     weights <- str2formula(options[["weights"]])
     probs   <- NULL
   } else {
     weights <- NULL
-    probs <- str2formula(options[["probs"]])
+    probs <- str2formula(options[["weights"]])
   }
 
   fpc <- str2formula(options[["fpc"]]) %||% NULL
@@ -121,6 +118,11 @@ designTable <- function(surveyDesign, jaspResults, options) {
   designTable <- createJaspTable(title = gettext("Survey design"))
   designTable$addColumnInfo(name = "type", title = gettext("Type"), type = "string")
 
+  if (!isReady(surveyDesign)) {
+    jaspResults[["summaryTable"]] <- designTable
+    return()
+  }
+
   # the code below mimics survey:::print.survey.design2
   x <- surveyDesign$design
   hasStrata <- x$has.strata
@@ -145,22 +147,20 @@ designTable <- function(surveyDesign, jaspResults, options) {
   designTable[["type"]] <- if (isIndependent) fmt else sprintf(fmt, noLevels, noClusters)
 
   jaspResults[["summaryTable"]] <- designTable
-  if (!isReady(surveyDesign))
-    return()
 
 }
 
 summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
 
   summaryContainer <- jaspResults[["summaryContainer"]] %setOrRetrieve%
-    createJaspContainer(title = gettext("Survey Descriptives"), dependencies = c("variables", "split"))
+    createJaspContainer(title = gettext("Survey Descriptives"), dependencies = c("variables", "split", "ci", "ciLevel", "se", "cv"))
 
   if (!is.null(summaryContainer[["meanTable"]]) &&
       (!options[["total"]] || !is.null(summaryContainer[["totalTable"]])) &&
       (!options[["var"]]   || !is.null(summaryContainer[["varTable"]])))
     return()
 
-  statisticsAskedFor <- c("mean", "total", "var")[c(TRUE, options[["total"]], options[["var"]])]
+  statisticsAskedFor <- c("mean", "total", "var")[c(options[["mean"]], options[["total"]], options[["var"]])]
 
   lst <- list()
   for (stat in statisticsAskedFor) {
@@ -179,6 +179,7 @@ summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
 initializeSummaryTable <- function(stat, options) {
 
   table <- createJaspTable(title = gettextf("Summary Statistics - %s", stat))
+  table$dependOn(stat)
 
   table$addColumnInfo(name = "variable", title = "", type = "string")
   if (hasSplit(options))
@@ -198,7 +199,8 @@ initializeSummaryTable <- function(stat, options) {
   if (options[["cv"]]) table$addColumnInfo(name = "cv", title = gettext("Coefficient of Variation"), type = "number")
 
   if (options[["ci"]]) {
-    overtitle <- gettextf("%.2f%% Confidence interval", 100 * options[["ciLevel"]])
+    ciLevelFormatted <- format(100 * options[["ciLevel"]], digits = 3, drop0trailing = TRUE)
+    overtitle <- gettextf("%s%% Confidence interval", ciLevelFormatted)
     table$addColumnInfo(name = "lower", title = gettext("Lower"), type = "number", overtitle = overtitle)
     table$addColumnInfo(name = "upper", title = gettext("Upper"), type = "number", overtitle = overtitle)
   }
@@ -374,6 +376,13 @@ testPlot <- function(jaspResults) {
 
 }
 
-hasSplit <- function(options) {
-  return(!is.null(options[["split"]]))
+str2formula <- function(x) {
+  isEmpty(x) && return(NULL)
+  (length(x) == 1) && return(as.formula(paste("~", x)))
+  return(as.formula(paste("~", paste(x, collapse = "+"))))
 }
+
+isEmpty <- function(x) (length(x) == 0L) || (is.character(x) && identical(x, ""))
+
+hasWeights <- function(options) return(identical(options[["weightsOrProbs"]], "weights"))
+hasSplit   <- function(options) return(!is.null(options[["split"]]))
