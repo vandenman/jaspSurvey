@@ -66,7 +66,7 @@ dataDesign <- survey::svydesign(
 survey::svyby(api99 ~stype, dataDesign, survey::svymean, keep.var=FALSE)
 
 graphics.off(); dev.cur()
-aa <- survey::svyboxplot(api99 ~stype, dataDesign, plot = FALSE)
+survey::svyboxplot(api99 ~stype, dataDesign)
 survey:::svyboxplot.default
 dev.cur()
 

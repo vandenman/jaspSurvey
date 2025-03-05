@@ -114,6 +114,16 @@ Form
 					name: "distributionPlots";	label: qsTr("Distribution plots");	id:	distributionPlots
 					info: qsTr("For continuous variables, displays a histogram and the fit of a nonparametric density estimator. For nominal and ordinal variables, displays a frequency distribution.")
 				}
+				CheckBox
+				{
+					name: "scatterPlots";	label: qsTr("Scatter plots");
+					info: qsTr("For all pairs of continuous variables, display a scatter plot.")
+				}
+				CheckBox
+				{
+					name: "boxPlots";	label: qsTr("Box plots");
+					info: qsTr("For all pairs of continuous variables, display a scatter plot.")
+				}
 			}
 		}
 	}

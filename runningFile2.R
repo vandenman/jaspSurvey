@@ -44,7 +44,8 @@ options2 <- list(
   ciLevel = .95,
   se = TRUE,
   cv = TRUE,
-  distributionPlots = TRUE
+  distributionPlots = TRUE,
+  scatterPlots = TRUE
 )
 for (key in names(options2)) {
   options[[key]] <- options2[[key]]
@@ -57,8 +58,18 @@ for (key in names(options2)) {
 # debugonce(jaspSurvey:::surveyDescriptives)
 
 
-debug(jaspSurvey:::ggSvyHist)
+debug(jaspSurvey:::scatterPlot)
+undebug(jaspSurvey:::scatterPlot)
+devtools::load_all()
 result <- runAnalysis(name = "surveyDescriptives", options = options, dataset = dataset)
+
+dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
+survey::svyboxplot(api99 ~ stype, design)
+boxplot(api99 ~ stype, apiclus2)
+
+survey::svyboxplot(api99 ~ 1, design)
+boxplot(apiclus2$api99)
+
 
 # library(survey)
 # dclus2 <- survey::svydesign(id=~dnum+snum, fpc=~fpc1+fpc2, data=apiclus2)

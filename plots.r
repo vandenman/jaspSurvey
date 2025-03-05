@@ -56,8 +56,7 @@ ggSvyHist <- function(xName, design, binWidthType = "doane", numberOfBins = NA,
 
 
 data(api)
-dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat,
-                    fpc = ~fpc)
+dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat, fpc = ~fpc)
 
 xName <- "enroll"
 design <- dstrat
@@ -80,8 +79,7 @@ jaspGraphs::jaspHistogram(x, "enroll")
 
 
 data(api)
-dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat,
-                    fpc = ~fpc)
+dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat, fpc = ~fpc)
 svyhist(~enroll, dstrat, main="Survey weighted",col="purple",ylim=c(0,1.3e-3))
 
 
@@ -179,12 +177,12 @@ ggplot2::ggplot(
 
 scatterPlotDesign <- function(design, x, y, splitVars = NULL,
                               splitMethod = c("facet", "group"),
-                              minAlpha = .2, maxAlpha = 1.) {
+                              minAlpha = .2, maxAlpha = 1., mapWeightsToSize = FALSE) {
 
   splitMethod <- match.arg(splitMethod)
 
   # TODO: use jasp colors
-  basecol = function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)]
+  basecol  <- function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)]
   transcol <- function(base,opacity){
     rgbs<-col2rgb(base)/255
     rgb(rgbs[1,],rgbs[2,], rgbs[3,], alpha=opacity)
@@ -193,10 +191,10 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
 
 
 
-  wt <- weights(design,"sampling")
+  wt <- weights(design, "sampling")
   df <- model.frame(design)
 
-  # normalize colros
+  # normalize colors
   maxw   <- max(wt)
   minw   <- 0
   alpha  <- c(minAlpha, maxAlpha)
@@ -207,6 +205,9 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
   yvar <- ggplot2::sym(y)
 
   mapping <- ggplot2::aes(x = !!xvar, y = !!yvar)
+  if (mapWeightsToSize)
+    mapping[["size"]] <- wt
+
   facet <- NULL
   if (!isEmpty(splitVars) && splitMethod == "facet")
     facet <- ggplot2::facet_wrap(str2formula(splitVars))
@@ -431,20 +432,80 @@ ggplot2::ggplot(gghex, ggplot2::aes(x, y, fill = colors)) +
 
 
 
+scatterPlotDesign <- function(design, x, y, color = NULL, splitVars = NULL,
+                              splitMethod = c("facet", "group"),
+                              minAlpha = .2, maxAlpha = 1., mapWeightsToSize = FALSE) {
+
+  splitMethod <- match.arg(splitMethod)
+
+
+  wt <- weights(design, "sampling")
+  df <- model.frame(design)
+
+  # TODO: use jasp colors
+  if (!is.null(color)) {
+    basecol  <- function(d) c("darkred","purple","forestgreen")[as.numeric(df[[color]])]
+    transcol <- function(base, opacity){
+      rgbs <- col2rgb(base)/255
+      rgb(rgbs[1,],rgbs[2,], rgbs[3,], alpha=opacity)
+    }
+    if (is.function(basecol)) basecol <- basecol(model.frame(design))
+
+    # normalize colors
+    maxw   <- max(wt)
+    minw   <- 0
+    alpha  <- c(minAlpha, maxAlpha)
+    alphas <- (alpha[1] * (maxw - wt) + alpha[2] * (wt - minw)) / (maxw - minw)
+    cols   <- transcol(basecol,alphas)
+    points <- jaspGraphs::geom_point(color = cols, fill = cols)
+  } else {
+    points <- jaspGraphs::geom_point()
+  }
+
+
+  xvar <- ggplot2::sym(x)
+  yvar <- ggplot2::sym(y)
+
+  mapping <- ggplot2::aes(x = !!xvar, y = !!yvar)
+  if (mapWeightsToSize)
+    mapping[["size"]] <- wt
+
+  facet <- NULL
+  if (!isEmpty(splitVars) && splitMethod == "facet")
+    facet <- ggplot2::facet_wrap(str2formula(splitVars))
+
+  df$awards <- factor(df$awards, levels = c("Yes", "No"))
+  ggplot2::ggplot(
+    data = df,
+    mapping
+  ) +
+    points +
+    facet +
+    # ggplot2::facet_grid(cols=ggplot2::vars(stype), rows = ggplot2::vars(awards)) +
+    jaspGraphs::geom_rangeframe() +
+    jaspGraphs::themeJaspRaw()
+
+}
 
 data(api, package = "survey")
 dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
 scatterPlotDesign(dclus2, "meals", "api00")
-scatterPlotDesign(dclus2, "meals", "api00", "stype")
-scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group")
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
-                  minAlpha = .5, maxAlpha = .7)
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "group",
-                  minAlpha = .5, maxAlpha = .7)
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
-                  minAlpha = .25, maxAlpha = 1.0, mapWeightsToSize = TRUE)
+scatterPlotDesign(dclus2, "meals", "api00", color = "stype", splitVars = "stype")
+scatterPlotDesign(dclus2, "meals", "api00", color = "stype", splitMethod = "group")
+scatterPlotDesign(dclus2, "meals", "api00", color = "stype", c("stype", "awards"), splitMethod = "facet", minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", color = "stype", c("stype", "awards"), splitMethod = "group", minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", color = "stype", c("stype", "awards"), splitMethod = "facet", minAlpha = .25, maxAlpha = 1.0, mapWeightsToSize = TRUE)
+
+svycoplot(api00~meals, design, style="transparent")
+svycoplot(api00~meals|stype,design=dclus2, style="transparent", basecol=function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)], alpha=c(0,1))
+# not possible
+svycoplot(api00~meals|stype*awards, design=dclus2, style="transparent", basecol=function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)], alpha=c(0,1))
+# not possible
+svycoplot(api00~meals|stype*awards, design=dclus2, style="hexbin", basecol=function(d) c("darkred","purple","forestgreen")[as.numeric(d$stype)], alpha=c(0,1))
 
 
+svycoplot(api00~api99|col.grad*comp.imp, design=dclus2, style="hexbin")
+svycoplot(awards~stype, design=dclus2, style="hexbin")
 
 # setup for a customizable scatter plot
 df <- model.frame(dclus2)

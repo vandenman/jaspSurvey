@@ -21,16 +21,12 @@
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
 
-  # print("R says: options")
-  # print(options)
-  # print("R says: head(dataset)")
-  # print(head(dataset, 10))
-
   surveyDesign <- setupDesign(jaspResults, dataset, options)
 
-  designTable(surveyDesign, jaspResults, options)
-  summaryTable(surveyDesign,  jaspResults, dataset, options)
+  designTable(  surveyDesign, jaspResults,          options)
+  summaryTable( surveyDesign, jaspResults, dataset, options)
   histogramPlot(surveyDesign, jaspResults, dataset, options)
+  scatterPlot(  surveyDesign, jaspResults, dataset, options)
 
 }
 
@@ -404,7 +400,7 @@ ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
 
 }
 
-scatterPlotDesign <- function(design, x, y, splitVars = NULL,
+ggSvycoPlot <- function(design, x, y, color = NULL, splitVars = NULL,
                               splitMethod = c("facet", "group"),
                               mapWeightsToAlpha = TRUE,
                               minAlpha = .2, maxAlpha = 1.,
@@ -439,10 +435,10 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
   mapping$y <- ggplot2::sym(y)
 
   colorScale <- fillScale <- NULL
-  if (!isEmpty(splitVars)) {
+  if (!isEmpty(color)) {
     colorvar <-
-      if (length(splitVars) == 1) rlang::sym(splitVars)
-      else                        rlang::call2(quote(interaction), !!!lapply(splitVars, rlang::sym))
+      if (length(color) == 1) rlang::sym(color)
+      else                    rlang::call2(quote(interaction), !!!lapply(color, rlang::sym))
 
     mapping$color <- colorvar
     mapping$fill  <- colorvar
@@ -470,7 +466,7 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
   scale_y <- ggplot2::scale_y_continuous(name = y, breaks = yBreaks, limits = range(yBreaks))
 
   ggplot2::ggplot(data = df, mapping) +
-    ggplot2::geom_point() +
+    jaspGraphs::geom_point() +
     alphaScale + sizeScale + colorScale + fillScale +
     scale_x + scale_y +
     facet +
@@ -478,6 +474,57 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
     ggplot2::labs(color = NULL, fill = NULL) +
     jaspGraphs::themeJaspRaw(legend.position = "right")
 
+}
+
+
+scatterPlot <- function(surveyDesign, jaspResults, dataset, options) {
+
+  if (!options[["scatterPlots"]])
+    return()
+
+  scatterPlotContainer <- jaspResults[["scatterPlotContainer"]] %setOrRetrieve%
+    createJaspContainer(title = gettext("Scatter Plots"),
+                        dependencies = c("scatterPlots", setdiff(designDependencies(), "variables")))
+
+  variables <- options[["variables"]]
+  for (i in 1:(length(variables) - 1)) {
+    for (j in (i + 1):length(variables)) {
+
+      v1 <- variables[i]
+      v2 <- variables[j]
+
+      # TODO: this check is not working!
+      if (is.factor(dataset[[v1]]) || is.factor(dataset[[v2]])) {
+        message("skipping pair ", v1, " - ", v2)
+        next
+      }
+
+      pairName <- sprintf("%s - %s", v1, v2)
+      scatterPlotContainer[[pairName]] %setOrRetrieve% {
+        # maybe just fix https://github.com/jasp-stats/INTERNAL-jasp/issues/516 for the extra nice syntax?
+        error <- ggplt <- NULL
+        if (isReady(surveyDesign)) {
+          ggplt <- try({
+            ggSvycoPlot(
+              surveyDesign[["design"]], v1, v2, options[["splitBy"]]
+              # TODO: add more options
+            )
+          })
+          if (inherits(plot, "try-error")) {
+            error <- .extractErrorMessage(ggplt)
+            ggplt <- NULL
+          }
+        }
+        createJaspPlot(
+          title        = gettextf("Scatterplot of %1$s vs. %2$s", v1, v2),
+          plot         = ggplt,
+          dependencies = jaspDeps(optionContainsValue = list(variables = c(v1, v2))),
+          error        = error
+        )
+      }
+
+    }
+  }
 }
 
 histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
@@ -496,8 +543,10 @@ histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
       error <- ggplt <- NULL
       if (isReady(surveyDesign)) {
         ggplt <- try(ggSvyHist(surveyDesign[["design"]], variable))
-        if (inherits(plot, "try-error"))
+        if (inherits(plot, "try-error")) {
           error <- .extractErrorMessage(ggplt)
+          ggplt <- NULL
+        }
       }
       createJaspPlot(
         title        = gettextf("Histogram of %s", variable),
