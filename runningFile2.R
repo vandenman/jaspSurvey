@@ -1,7 +1,8 @@
-renv::install('.', prompt = FALSE)
+# renv::install('.', prompt = FALSE)
 
 # renv::install(c("jasp-stats/jaspGraphs", "jasp-stats/jaspBase"))
 
+# renv::install("jasp-stats/jaspTools")
 library(jaspTools)
 # setupJaspTools("~/github/jasp/jasp-desktop", FALSE, FALSE)
 setPkgOption("module.dirs", ".")
@@ -11,10 +12,10 @@ options <- analysisOptions("surveyDescriptives")
 data(api, package = "survey")
 dataset <- apiclus1
 
-write.csv(apiclus1, "apiclus1.csv", row.names = FALSE)
+# write.csv(apiclus1, "apiclus1.csv", row.names = FALSE)
 
 
-options <- list(
+options2 <- list(
   id         = "dnum",
   hasWeights = TRUE,
   probs      = "",
@@ -42,8 +43,12 @@ options <- list(
   ci = TRUE,
   ciLevel = .95,
   se = TRUE,
-  cv = TRUE
+  cv = TRUE,
+  distributionPlots = TRUE
 )
+for (key in names(options2)) {
+  options[[key]] <- options2[[key]]
+}
 
 
 # debugonce(runAnalysis)
@@ -51,5 +56,15 @@ options <- list(
 
 # debugonce(jaspSurvey:::surveyDescriptives)
 
-debugonce(jaspSurvey:::computeSummaryTables)
+
+debug(jaspSurvey:::ggSvyHist)
 result <- runAnalysis(name = "surveyDescriptives", options = options, dataset = dataset)
+
+# library(survey)
+# dclus2 <- survey::svydesign(id=~dnum+snum, fpc=~fpc1+fpc2, data=apiclus2)
+# debugonce(survey::svyttest)
+# tt <- survey::svyttest(enroll~comp.imp, dclus2, use_rcpp = FALSE)
+# tt
+# confint(tt, level=0.9)
+# debugonce(svyglm)
+# m <- svyglm(enroll~comp.imp, dclus2, family=gaussian())

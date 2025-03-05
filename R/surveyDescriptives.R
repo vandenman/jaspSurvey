@@ -21,10 +21,10 @@
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
 
-  print("R says: options")
-  print(options)
-  print("R says: head(dataset)")
-  print(head(dataset, 10))
+  # print("R says: options")
+  # print(options)
+  # print("R says: head(dataset)")
+  # print(head(dataset, 10))
 
   surveyDesign <- setupDesign(jaspResults, dataset, options)
 
@@ -480,61 +480,6 @@ scatterPlotDesign <- function(design, x, y, splitVars = NULL,
 
 }
 
-data(api, package = "survey")
-dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
-scatterPlotDesign(dclus2, "meals", "api00")
-scatterPlotDesign(dclus2, "meals", "api00", "stype")
-scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group")
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
-                  minAlpha = .5, maxAlpha = .7)
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "group",
-                  minAlpha = .5, maxAlpha = .7)
-scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
-                  minAlpha = .25, maxAlpha = 1.0, mapWeightsToSize = TRUE)
-
-
-
-# setup for a customizable scatter plot
-df <- model.frame(dclus2)
-xBreaks <- jaspGraphs::getPrettyAxisBreaks(df$meals)
-yBreaks <- jaspGraphs::getPrettyAxisBreaks(df$api00)
-pScatter <- scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group", xBreaks = xBreaks, yBreaks = yBreaks)
-pHistTop   <- ggSvyHist(dclus2, "meals", xBreaks = xBreaks, addRangeFrame = FALSE) + ggplot2::theme_void()
-pHistRight <- ggSvyHist(dclus2, "api00", xBreaks = yBreaks, addRangeFrame = FALSE) + ggplot2::theme_void() + ggplot2::coord_flip()
-
-# debug_x_thm <- ggplot2::theme(
-#   axis.line.x = ggplot2::element_line(),
-#   axis.ticks.x = ggplot2::element_line(),
-#   axis.ticks.length.x = ggplot2::unit(3, "points"),
-#   axis.text.x = ggplot2::element_text()
-# )
-# debug_y_thm <- ggplot2::theme(
-#   axis.line.y = ggplot2::element_line(),
-#   axis.ticks.y = ggplot2::element_line(),
-#   axis.ticks.length.y = ggplot2::unit(10, "pt"),
-#   axis.text.y = ggplot2::element_text()
-# )
-# pHistTop <- pHistTop + debug_x_thm
-# pHistRight <- pHistRight + debug_y_thm
-
-# layout <- "AAAA#
-#            BBBBC
-#            BBBBC
-#            BBBBC
-#            BBBBC"
-layout <- c(
-  patchwork::area(1, 1, 1, 4),
-  patchwork::area(2, 1, 5, 4),
-  patchwork::area(2, 5, 5, 5)
-)
-# plot(layout)
-pHistTop + pScatter + pHistRight +
-  patchwork::plot_layout(
-    axes    = "collect",
-    guides  = "collect",
-    design  = layout
-)
-
 histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
 
   if (!options[["distributionPlots"]])
@@ -546,18 +491,24 @@ histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
 
   for (variable in options[["variables"]]) {
 
-    histogramContainer[[variable]] %setOrRetrieve%
+    histogramContainer[[variable]] %setOrRetrieve% {
+      # maybe just fix https://github.com/jasp-stats/INTERNAL-jasp/issues/516 for the extra nice syntax?
+      error <- ggplt <- NULL
+      if (isReady(surveyDesign)) {
+        ggplt <- try(ggSvyHist(surveyDesign[["design"]], variable))
+        if (inherits(plot, "try-error"))
+          error <- .extractErrorMessage(ggplt)
+      }
       createJaspPlot(
         title        = gettextf("Histogram of %s", variable),
-        plot         = if (isReady(surveyDesign)) ggSvyHist(surveyDesign[["design"]], variable),
-        dependencies = jaspDeps(optionContainsValue = list(variables = variable))
+        plot         = ggplt,
+        dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
+        error        = error
       )
-
+    }
   }
 
 }
-
-
 
 str2formula <- function(x) {
   isEmpty(x) && return(NULL)

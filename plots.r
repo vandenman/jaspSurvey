@@ -5,6 +5,7 @@
 library(survey)
 renv::install("~/github/jasp/jasp-desktop/Engine/jaspGraphs", prompt = FALSE)
 
+
 ggSvyHist <- function(xName, design, binWidthType = "doane", numberOfBins = NA,
                       density = FALSE) {
 
@@ -425,3 +426,63 @@ ggplot2::ggplot(gghex, ggplot2::aes(x, y, fill = colors)) +
   ggplot2::geom_hex(stat = 'identity') +
   ggplot2::geom_text(ggplot2::aes(label = paste(colors, hexclust, sep = '\n')), size = 2.5) +
   ggplot2::scale_fill_identity()
+
+
+
+
+
+
+data(api, package = "survey")
+dclus2 <- survey::svydesign(id=~dnum+snum, weights=~pw, data=apiclus2, fpc=~fpc1+fpc2)
+scatterPlotDesign(dclus2, "meals", "api00")
+scatterPlotDesign(dclus2, "meals", "api00", "stype")
+scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group")
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
+                  minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "group",
+                  minAlpha = .5, maxAlpha = .7)
+scatterPlotDesign(dclus2, "meals", "api00", c("stype", "awards"), splitMethod = "facet",
+                  minAlpha = .25, maxAlpha = 1.0, mapWeightsToSize = TRUE)
+
+
+
+# setup for a customizable scatter plot
+df <- model.frame(dclus2)
+xBreaks <- jaspGraphs::getPrettyAxisBreaks(df$meals)
+yBreaks <- jaspGraphs::getPrettyAxisBreaks(df$api00)
+pScatter <- scatterPlotDesign(dclus2, "meals", "api00", "stype", splitMethod = "group", xBreaks = xBreaks, yBreaks = yBreaks)
+pHistTop   <- ggSvyHist(dclus2, "meals", xBreaks = xBreaks, addRangeFrame = FALSE) + ggplot2::theme_void()
+pHistRight <- ggSvyHist(dclus2, "api00", xBreaks = yBreaks, addRangeFrame = FALSE) + ggplot2::theme_void() + ggplot2::coord_flip()
+
+# debug_x_thm <- ggplot2::theme(
+#   axis.line.x = ggplot2::element_line(),
+#   axis.ticks.x = ggplot2::element_line(),
+#   axis.ticks.length.x = ggplot2::unit(3, "points"),
+#   axis.text.x = ggplot2::element_text()
+# )
+# debug_y_thm <- ggplot2::theme(
+#   axis.line.y = ggplot2::element_line(),
+#   axis.ticks.y = ggplot2::element_line(),
+#   axis.ticks.length.y = ggplot2::unit(10, "pt"),
+#   axis.text.y = ggplot2::element_text()
+# )
+# pHistTop <- pHistTop + debug_x_thm
+# pHistRight <- pHistRight + debug_y_thm
+
+# layout <- "AAAA#
+#            BBBBC
+#            BBBBC
+#            BBBBC
+#            BBBBC"
+layout <- c(
+  patchwork::area(1, 1, 1, 4),
+  patchwork::area(2, 1, 5, 4),
+  patchwork::area(2, 5, 5, 5)
+)
+# plot(layout)
+pHistTop + pScatter + pHistRight +
+  patchwork::plot_layout(
+    axes    = "collect",
+    guides  = "collect",
+    design  = layout
+  )
