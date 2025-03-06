@@ -44,9 +44,17 @@ Form
 
 	VariablesForm
 	{
+		id: variablesForm
+		implicitHeight: 1.4 * jaspTheme.defaultVariablesFormHeight
+
 		infoLabel: qsTr("Input")
 		AvailableVariablesList	{ name: "allVariablesList"								}
-		AssignedVariablesList	{ name: "variables";		title: qsTr("Variables");	info: qsTr("All variables of interest."); allowTypeChange: true }
+		AssignedVariablesList
+		{
+			// implicitHeight: 0.25 * variablesForm.implicitHeight
+			// maxRows: 6
+			name: "variables";		title: qsTr("Variables");	info: qsTr("All variables of interest."); allowTypeChange: true
+		}
 		AssignedVariablesList	{ name: "weights";			title: weightsOrProbs.value === "weights" ? qsTr("Weights") : qsTr("Probabilities");		info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["scale"]}
 		RadioButtonGroup
 		{
@@ -60,7 +68,11 @@ Form
 		AssignedVariablesList	{ name: "fpc";			title: qsTr("Finite population correction");		info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["scale"]; minNumericLevels: 1}
 		AssignedVariablesList	{ name: "id";			title: qsTr("Id");									info: qsTr("Can be split by a categorical variable such as experimental condition.") ; singleVariable: true; allowedColumns: ["nominal"]; minLevels: 1; maxLevels: 1024 }
 
-		AssignedVariablesList	{ name: "splitBy";				title: qsTr("Split");			info: qsTr("Can be split by a categorical variables such as experimental condition.") ; singleVariable: false; allowedColumns: ["nominal"]; minLevels: 1; maxLevels: 1024 }
+		AssignedVariablesList
+		{
+			name: "splitBy";				title: qsTr("Split");			info: qsTr("Can be split by a categorical variables such as experimental condition.") ; singleVariable: false; allowedColumns: ["nominal"]; minLevels: 1; maxLevels: 256
+			implicitHeight: 3 * jaspTheme.defaultSingleItemListHeight
+		}
 	}
 
 	CheckBox
@@ -80,9 +92,10 @@ Form
 			title: qsTr("Outcomes")
 			infoLabel: qsTr("Central Tendency (only for continuous variables)")
 
-			CheckBox { name: "mean";		label: qsTr("Mean");		info: qsTr("Weighted estimation of the design mean for the selected variables.")	 ; checked: true	}
-			CheckBox { name: "total";		label: qsTr("Total");		info: qsTr("Weighted estimation of the design total for the selected variables.")						}
-			CheckBox { name: "var";			label: qsTr("Variance");	info: qsTr("Weighted estimation of the design variance for the selected variables.")					}
+			CheckBox { name: "mean";				label: qsTr("Mean");			info: qsTr("Weighted estimation of the design mean for the selected variables.")	 ; checked: true	}
+			CheckBox { name: "total";				label: qsTr("Total");			info: qsTr("Weighted estimation of the design total for the selected variables.")						}
+			CheckBox { name: "var";					label: qsTr("Variance");		info: qsTr("Weighted estimation of the design variance for the selected variables.")					}
+			CheckBox { name: "coefficientAlpha";	label: qsTr("Coefficient α");	info: qsTr("Weighted estimation of the Coefficient α (also known as Cronbach's α).")					}
 		}
 
 		Group
@@ -106,24 +119,20 @@ Form
 
 		Group
 		{
-			Row
+			CheckBox
 			{
-				spacing: jaspTheme.columnGroupSpacing
-				CheckBox
-				{
-					name: "distributionPlots";	label: qsTr("Distribution plots");	id:	distributionPlots
-					info: qsTr("For continuous variables, displays a histogram and the fit of a nonparametric density estimator. For nominal and ordinal variables, displays a frequency distribution.")
-				}
-				CheckBox
-				{
-					name: "scatterPlots";	label: qsTr("Scatter plots");
-					info: qsTr("For all pairs of continuous variables, display a scatter plot.")
-				}
-				CheckBox
-				{
-					name: "boxPlots";	label: qsTr("Box plots");
-					info: qsTr("For all pairs of continuous variables, display a scatter plot.")
-				}
+				name: "distributionPlots";	label: qsTr("Distribution plots");	id:	distributionPlots
+				info: qsTr("For continuous variables, displays a histogram and the fit of a nonparametric density estimator. For nominal and ordinal variables, displays a frequency distribution.")
+			}
+			CheckBox
+			{
+				name: "scatterPlots";	label: qsTr("Scatter plots");
+				info: qsTr("For all pairs of continuous variables, display a scatter plot.")
+			}
+			CheckBox
+			{
+				name: "boxPlots";	label: qsTr("Box plots");
+				info: qsTr("For all pairs of continuous variables, display a scatter plot.")
 			}
 		}
 	}

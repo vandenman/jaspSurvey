@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013-2024 University of Amsterdam
+# Copyright (C) 2013-2025 University of Amsterdam
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,7 +16,7 @@
 #
 
 #' @importFrom jaspBase createJaspTable createJaspContainer
-#' createJaspState createJaspPlot jaspDeps
+#' createJaspState createJaspPlot jaspDeps .extractErrorMessage
 
 #'@export
 surveyDescriptives <- function(jaspResults, dataset, options) {
@@ -25,8 +25,10 @@ surveyDescriptives <- function(jaspResults, dataset, options) {
 
   designTable(  surveyDesign, jaspResults,          options)
   summaryTable( surveyDesign, jaspResults, dataset, options)
+  alphaTable(   surveyDesign, jaspResults, dataset, options)
   histogramPlot(surveyDesign, jaspResults, dataset, options)
   scatterPlot(  surveyDesign, jaspResults, dataset, options)
+  boxPlot(      surveyDesign, jaspResults, dataset, options)
 
 }
 
@@ -107,6 +109,7 @@ getDesignTypeFmt <- function(independent, strat, withReplacement) {
 
 }
 
+# ---- tables ----
 designTable <- function(surveyDesign, jaspResults, options) {
 
   if (!is.null(jaspResults[["designTable"]]))
@@ -136,7 +139,7 @@ designTable <- function(surveyDesign, jaspResults, options) {
     isIndependent   <- FALSE
     noLevels        <- NCOL(x$cluster)
     withReplacement <- is.null(x$fpc$popsize)
-    noClusters      <- paste(unlist(lapply(x$cluster,function(i) length(unique(i)))),collapse=", ")
+    noClusters      <- paste(unlist(lapply(x$cluster,function(i) length(unique(i)))),collapse = ", ")
 
   }
 
@@ -150,7 +153,8 @@ designTable <- function(surveyDesign, jaspResults, options) {
 summaryTable <- function(surveyDesign, jaspResults, dataset, options) {
 
   summaryContainer <- jaspResults[["summaryContainer"]] %setOrRetrieve%
-    createJaspContainer(title = gettext("Survey Descriptives"), dependencies = c("variables", "split", "ci", "ciLevel", "se", "cv"))
+    createJaspContainer(title = gettext("Survey Descriptives"),
+                        dependencies = c(designDependencies(), "split", "ci", "ciLevel", "se", "cv"))
 
   if (!is.null(summaryContainer[["meanTable"]]) &&
       (!options[["total"]] || !is.null(summaryContainer[["totalTable"]])) &&
@@ -222,9 +226,9 @@ computeSummaryTables <- function(design, options) {
   )
 
   variables <- str2formula(options[["variables"]])
-  splitFormula <- str2formula(options[["split"]])
+  splitFormula <- str2formula(options[["splitBy"]])
 
-  split <- hasSplit(options)
+  split <- is.null(splitFormula)
   executor <- if (split) {
     function(f) survey::svyby(variables, splitFormula, design = design, f)
   } else {
@@ -270,6 +274,7 @@ computeSummaryTables <- function(design, options) {
   return(tableDf)
 }
 
+# TODO: this is unused?
 fillSummaryTable <- function(table, surveyDesign, dataset, options) {
 
   split <- hasSplit(options)
@@ -351,6 +356,27 @@ fillSummaryTable <- function(table, surveyDesign, dataset, options) {
   }
 }
 
+alphaTable <-  function(surveyDesign, jaspResults, dataset, options) {
+
+  if (!options[["coefficientAlpha"]] || !is.null(jaspResults[["alphaTable"]]))
+    return()
+
+  alphaTable <- createJaspTable(title = gettext("Coefficient α"), dependencies = c("coefficientAlpha", designDependencies()))
+  alphaTable$addColumnInfo(name = "alpha", title = gettext("α"), type = "number")
+  jaspResults[["alphaTable"]] <- alphaTable
+
+  if (isReady(surveyDesign)) {
+    alphaValue <- try(survey::svycralpha(str2formula(options[["variables"]]), surveyDesign[["design"]]))
+    if (inherits(alphaValue, "try-error")) {
+      alphaTable$setError(.extractErrorMessage(alphaValue))
+    } else {
+      alphaTable[["alpha"]] <- unname(alphaValue)
+    }
+  }
+}
+
+# ---- plots ----
+## ---- ggplot2 ----
 ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
                       density = FALSE, xBreaks = NULL, yBreaks = NULL,
                       addRangeFrame = TRUE) {
@@ -476,7 +502,139 @@ ggSvycoPlot <- function(design, x, y, color = NULL, splitVars = NULL,
 
 }
 
+#' Survey Box plot
+#' @param design the survey design
+#' @param variable the variable to plot
+#' @param split NULL or one or more variables to split the boxplot by
+#' @param all.outliers logical, whether to show all outliers or just the extreme ones, for compatability with `survey::svyboxplot`.
+#' @examples
+#' library(survey)
+#' data(api)
+#' apistrat$interaction <- factor(paste(apistrat$stype, apistrat$comp.imp, sep=" & "))
+#' dstrat <- svydesign(id = ~1, strata = ~stype, weights = ~pw, data = apistrat, fpc = ~fpc)
+#'
+#' svyboxplot(enroll~1,dstrat, plot = FALSE, all.outliers = TRUE, ylims = c(0, 3500))
+#' ggSvyBoxplot("enroll", dstrat) + ggplot2::ylim(c(0, 3500))
+#'
+#' svyboxplot(enroll~stype,dstrat,all.outliers=TRUE)
+#' ggSvyBoxplot("enroll", dstrat, "stype")
+#'
+#' svyboxplot(enroll~stype * comp.imp,dstrat,all.outliers = TRUE) # fails
+#' svyboxplot(enroll~interaction,dstrat,all.outliers = TRUE) # workaround
+#' ggSvyBoxplot("enroll", dstrat, c("stype", "comp.imp"))
+#'
+ggSvyBoxplot <- function(design, variable, split = NULL, all.outliers = TRUE) {
 
+  outcome <- str2formula(variable)
+  mf <- stats::model.frame(outcome, stats::model.frame(design))
+  outcomeValues <- mf[[1]]
+
+  outlierGeom <- NULL
+  if (!is.null(split)) {
+
+    groups <- str2formula(split)
+    qs <- survey::svyby(outcome, groups, design, survey::svyquantile, ci = FALSE,
+                        keep.var = FALSE,
+                        quantiles = c(0,0.25,0.5,0.75,1),
+                        na.rm = TRUE
+    )
+
+    groupValues <- stats::model.frame(groups, stats::model.frame(design), na.action = na.pass)
+    nGroupValues <- ncol(groupValues)
+
+    subdataSplit <- split(outcomeValues, groupValues)
+
+    n <- NCOL(qs)
+    iqr <- qs[, n - 1] - qs[, n - 3]
+
+    low <- pmax(qs[, n - 4], qs[, n - 3] - 1.5 * iqr)
+    hi  <- pmin(qs[, n],     qs[, n - 1] + 1.5*iqr)
+
+    stats <- t(as.matrix(cbind(low, qs[, n - (3:1)], hi)))
+
+    outlierDf <- data.frame()
+
+    # note nrow(qs) == ncol(stats)
+    stopifnot(nrow(qs) == ncol(stats)) # DEBUG
+
+    splitLevels <- unname(apply(qs[, 1:nGroupValues, drop = FALSE], 1L, \(x) paste(x, collapse = " & ")))
+    splitLevelsOrder <- match(rownames(qs), colnames(stats))
+    stopifnot(identical(rownames(qs)[splitLevelsOrder], colnames(stats))) # DEBUG
+
+    splitLevels <- splitLevels[splitLevelsOrder]
+
+    cnmsStats <- colnames(stats)
+    for (i in 1:ncol(stats)) {
+
+
+      out <- c(if (qs[i, n] != hi[i]) qs[i, n], if (qs[i, n - 4] != low[i]) qs[i, n - 4])
+
+      outcomeValues_i <- subdataSplit[[cnmsStats[i]]]
+
+      if (all.outliers) {
+        outlo <- sort(outcomeValues_i[!is.na(outcomeValues_i) & outcomeValues_i < low[i]])
+        outhi <- sort(outcomeValues_i[!is.na(outcomeValues_i) & outcomeValues_i > hi[i] ])
+        outlierPoints <- na.omit(unique(c(outlo, outhi)))
+      } else {
+        outlierPoints <- c(if (qs[i, n] != hi[i]) qs[i, n], if (qs[i, n - 4] != low[i]) qs[i, n - 4])
+      }
+
+      if (length(outlierPoints) > 0)
+        outlierDf <- rbind(outlierDf, data.frame(x = splitLevels[i], y = outlierPoints))
+
+    }
+
+    if (nrow(outlierDf) > 0)
+      outlierGeom <- jaspGraphs::geom_point(data = outlierDf, ggplot2::aes(x = x, y = y))
+
+    xName <- paste(split, collapse = jaspBase::interactionSymbol)
+
+
+
+  } else {
+
+    qs <- stats::coef(survey::svyquantile(outcome, design, ci = FALSE, quantiles = c(0,0.25,0.5,0.75,1), na.rm = TRUE))
+    iqr <- qs[4] - qs[2]
+    stats <- matrix(c(max(qs[1], qs[2] - 1.5 * iqr), qs[2:4], min(qs[5], qs[4] + 1.5*iqr)))
+
+    if (all.outliers) {
+      outlo <- sort(outcomeValues[!is.na(outcomeValues) & outcomeValues < qs[2] - 1.5 * iqr])
+      outhi <- sort(outcomeValues[!is.na(outcomeValues) & outcomeValues > qs[4] + 1.5 * iqr])
+      outlierPoints <- na.omit(unique(c(outlo, outhi)))
+    } else {
+      outlierPoints <- c(if (qs[5] != stats[5]) qs[5], if (qs[1] != stats[1]) qs[1])
+    }
+
+    if (length(outlierPoints) > 0) {
+      outlierDf <- data.frame(x = "", y = outlierPoints)
+      outlierGeom <- jaspGraphs::geom_point(data = outlierDf, ggplot2::aes(x = x, y = y))
+    }
+
+    xName <- gettext("Total")
+  }
+  yName <- variable
+
+  boxplotDf <- data.frame(
+    x      = if (is.null(split)) "" else splitLevels,
+    ymin   = stats[1, ],
+    lower  = stats[2, ],
+    middle = stats[3, ],
+    upper  = stats[4, ],
+    ymax   = stats[5, ]
+  )
+
+  ggplot2::ggplot(boxplotDf, ggplot2::aes(x = x)) +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin = ymin, ymax = ymax), width = 0.3) +
+    ggplot2::geom_boxplot(ggplot2::aes(ymin = ymin, lower = lower, middle = middle, upper = upper, ymax = ymax),
+                          stat = "identity") +
+    outlierGeom +
+    ggplot2::labs(x = xName, y = yName) +
+    jaspGraphs::geom_rangeframe() +
+    jaspGraphs::themeJaspRaw()
+
+}
+
+## ---- jaspResults wrappers ----
 scatterPlot <- function(surveyDesign, jaspResults, dataset, options) {
 
   if (!options[["scatterPlots"]])
@@ -516,7 +674,7 @@ scatterPlot <- function(surveyDesign, jaspResults, dataset, options) {
           }
         }
         createJaspPlot(
-          title        = gettextf("Scatterplot of %1$s vs. %2$s", v1, v2),
+          title        = sprintf("%s - %s", v1, v2),
           plot         = ggplt,
           dependencies = jaspDeps(optionContainsValue = list(variables = c(v1, v2))),
           error        = error
@@ -543,13 +701,13 @@ histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
       error <- ggplt <- NULL
       if (isReady(surveyDesign)) {
         ggplt <- try(ggSvyHist(surveyDesign[["design"]], variable))
-        if (inherits(plot, "try-error")) {
+        if (inherits(ggplt, "try-error")) {
           error <- .extractErrorMessage(ggplt)
           ggplt <- NULL
         }
       }
       createJaspPlot(
-        title        = gettextf("Histogram of %s", variable),
+        title        = variable,
         plot         = ggplt,
         dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
         error        = error
@@ -559,6 +717,40 @@ histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
 
 }
 
+
+boxPlot <- function(surveyDesign, jaspResults, dataset, options) {
+
+  if (!options[["boxPlots"]])
+    return()
+
+  boxPlotContainer <- jaspResults[["boxPlotContainer"]] %setOrRetrieve%
+    createJaspContainer(title = gettext("Boxplots"),
+                        dependencies = c("boxPlots", "splitBy", setdiff(designDependencies(), "variables")))
+
+  for (variable in options[["variables"]]) {
+
+    boxPlotContainer[[variable]] %setOrRetrieve% {
+      error <- ggplt <- NULL
+      if (isReady(surveyDesign)) {
+        ggplt <- try(ggSvyBoxplot(surveyDesign[["design"]], variable, split = options[["splitBy"]]))
+        if (inherits(ggplt, "try-error")) {
+          error <- .extractErrorMessage(ggplt)
+          ggplt <- NULL
+        }
+      }
+      createJaspPlot(
+        title        = variable,
+        plot         = ggplt,
+        dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
+        error        = error
+      )
+    }
+  }
+
+}
+
+
+# ---- helpers ----
 str2formula <- function(x) {
   isEmpty(x) && return(NULL)
   (length(x) == 1) && return(as.formula(paste("~", x)))
