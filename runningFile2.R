@@ -155,3 +155,183 @@ if (length(attr(terms(formula),"term.labels"))) {
 }
 
 
+jaspGraphs::jaspHistogram
+
+library(survey)
+data(api)
+dstrat<-svydesign(id=~1,strata=~stype, weights=~pw, data=apistrat, fpc=~fpc)
+
+ggSvyHist(dstrat, "api99", binWidthType = "sturges")
+svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900))
+
+ggSvyHist(dstrat, "api99", binWidthType = "sturges", density = TRUE)
+
+svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900))
+dens1 <- survey::svysmooth(~api99, dstrat, xlim = c(300, 900))
+lines(dens1)
+
+# note that survey's density estimate may be negative, but we cut it off at 0
+svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900), ylim = c(-.001, .003))
+dens1 <- survey::svysmooth(~api99, dstrat, xlim = c(300, 900))
+lines(dens1)
+abline(h = 0)
+
+design <- dstrat
+variable <- "growth"
+split <- "stype"
+
+survey::svyboxplot(growth ~ stype, dstrat, all.outliers = TRUE)
+survey::svyboxplot(growth ~ 1, dstrat, all.outliers = TRUE)
+ggSvyRaincloud(dstrat, "growth")
+
+
+aaa <- survey::svysmooth(stype ~ growth, design, bandwidth = 30)
+str(aaa)
+
+debugonce(survey::svysmooth)
+
+unwrap.svysmooth <- function(x, ...) {
+  x
+}
+
+ggSvyRaincloud <- function(design, variable, split = NULL) {
+
+  if (is.null(split)) {
+
+    dens0 <- survey::svysmooth(str2formula(variable), design)
+    dens0[[variable]][["y"]] <- pmax(0, dens0[[variable]][["y"]])
+    violinGeom <- ggplot2::geom_ribbon(data = violinDf, ggplot2::aes(y = y, xmin = 0, xmax = 0 + width),
+                         fill = "grey80", color = "black")
+  } else {
+
+    # pick bandwidth using dpik, as done by svysmooth and then survey:::svylocpoly
+    mf <- stats::model.frame(str2formula(variable), stats::model.frame(design))
+    bandwidth <- KernSmooth::dpik(mf[, 1], gridsize = 401)
+
+    splitData <- stats::model.frame(str2formula(split), stats::model.frame(design))
+    splitIndices <- split(1:nrow(splitData), splitData)
+
+    subDesigns <- lapply(splitIndices, \(i) design[i, ])
+
+    # here we have
+    stopifnot(lengths(splitIndices) == sapply(subDesigns, \(x) length(x$prob)))
+
+    densityEstimates <- lapply(subDesigns, \(x) survey::svysmooth(str2formula(variable), x, bandwidth = bandwidth))
+
+    violinDf <- do.call(rbind, lapply(seq_along(densityEstimates), \(i) {
+      dens0 <- densityEstimates[[i]]
+      dx <- dens0[[variable]][["x"]]
+      dy <- dens0[[variable]][["y"]]
+      violinSubDf <- data.frame(
+        y     = c(dx, dx[length(dx)]),
+        width = c(dy / sum(dy), 0),
+        split = names(splitIndices)[i] # TODO: does this work for multiple split variables?
+      )
+    }))
+
+    violinGeom <- ggplot2::geom_ribbon(data = violinDf, ggplot2::aes(y = y, xmin = 0, xmax = 0 + width,
+                                                                     fill = split), alpha = .7)
+  }
+
+
+  # dx <- dens0[[variable]][["x"]]
+  # dy <- dens0[[variable]][["y"]]
+  # violinDf <- data.frame(
+  #   y     = c(dx, dx[length(dx)]),
+  #   width = c(dy / sum(dy), 0)
+  # )
+
+  temp <- ggSvyBoxplot(design, variable, split = split, returnDataOnly = TRUE, all.outliers = TRUE)
+  outlierDf <- temp$outlierDf
+  boxplotDf <- temp$boxplotDf
+  boxplotWidth <- .8 * max(violinDf$width)
+
+  if (is.null(split)) {
+    boxplotDf$x <- -boxplotWidth
+    if (nrow(outlierDf) > 0)
+      outlierDf$x <- -boxplotWidth
+
+    errorbar <- ggplot2::geom_errorbar(data = boxplotDf, ggplot2::aes(x = x, ymin = ymin, ymax = ymax), width = .8 *boxplotWidth)
+    boxplot <- ggplot2::geom_boxplot(data = boxplotDf, ggplot2::aes(x = x, ymin = ymin, lower = lower, middle = middle, upper = upper, ymax = ymax),
+                            stat = "identity", width = boxplotWidth)
+  } else {
+
+    boxplotDf$group <- as.factor(boxplotDf$x)
+    boxplotDf$x <- -boxplotWidth * 1.1 * as.numeric(as.factor(boxplotDf$x))
+
+    if (nrow(outlierDf) > 0) {
+      outlierDf$group <- as.factor(outlierDf$x)
+      outlierDf$x <- -boxplotWidth * 1.1 * as.numeric(as.factor(outlierDf$x))
+    }
+
+    errorbar <- ggplot2::geom_errorbar(data = boxplotDf, ggplot2::aes(x = x, ymin = ymin, ymax = ymax, color = group, group = group), width = .8 *boxplotWidth)
+    boxplot <- ggplot2::geom_boxplot(data = boxplotDf, ggplot2::aes(x = x, ymin = ymin, lower = lower, middle = middle, upper = upper, ymax = ymax, color = group, group = group),
+                                     stat = "identity", width = boxplotWidth, position = ggplot2::position_identity())
+  }
+
+  # TODO: this needs the colors as well!
+  mf <- model.frame(str2formula(variable), design[["variables"]], na.action = stats::na.pass)
+  # Y <- stats::model.response(mf)
+  # X <- mf[,attr(attr(mf,"terms"),"term.labels")]
+
+  # TODO: the -3 is not general for split, and the x should be separated when there is a split
+  xmax <- min(boxplotDf$x)
+  pointsData <- data.frame(
+    y = mf[, 1],
+    x = stats::runif(length(mf[, 1]), min = -3*boxplotWidth + xmax, max = -2*boxplotWidth + xmax),
+    w = stats::weights(design, "sampling")
+  )
+  if (is.null(split)) {
+    jaspGraphs::geom_point(data = pointsData, ggplot2::aes(x = x, y = y, size = w), alpha = .5)
+  } else {
+    pointsData$split <- factor(splitData[[1]]) # FIXME: this is not general
+    pointsGeom <- jaspGraphs::geom_point(data = pointsData, ggplot2::aes(x = x, y = y, size = w, fill = split), alpha = .5)
+  }
+
+  ggplot2::ggplot() +
+    errorbar +
+    boxplot +
+    jaspGraphs::geom_point(data = outlierDf, ggplot2::aes(x = x, y = y)) +
+    violinGeom +
+    pointsGeom +
+    jaspGraphs::geom_rangeframe() +
+    jaspGraphs::themeJaspRaw()
+}
+
+ggplot2::ggplot(
+  data.frame(x = dens0$api99$x, y = 100 * dens0$api99$y / sum(dens0$api99$y)),
+  ggplot2::aes(x = 1, y = x, violinwidth = y)) +
+  ggplot2::geom_violin(stat = "identity")
+
+
+
+svyplot(~api00, design=dstrat, style="bubble")
+svyplot(api00~runif(length(api00)), design=dstrat, style="bubble")
+svyplot(api00~rep(1,length(api00)), design=dstrat, style="transparent")
+svyplot(api00~api99, design=dstrat, style="transparent",pch=19)
+svycoplot(api00~api99, design=dstrat, style="transparent")
+
+
+qsmth<-svysmooth(api00~ell,dstrat, quantile=0.75, df=3,method="quantreg")
+lines(qsmth, col="red")
+
+smth<-svysmooth(api00~api99+ell,dstrat)
+
+
+
+plot(smth)
+plot(smth$api99)
+plot(smth, which="ell",lty=2,ylim=c(500,900))
+lines(qsmth, col="red")
+
+dens  <- survey::svysmooth(~api99, dstrat,bandwidth=30)
+dens1 <- survey::svysmooth(~api99, dstrat)
+svyhist(~api99,design=dstrat)
+lines(dens,col="purple",lwd=3)
+lines(dens1, col="forestgreen",lwd=2)
+
+
+
+m<-svyglm(api00~sin(api99/100)+stype, design=dstrat)
+termplot(m, data=model.frame(dstrat), partial.resid=TRUE, se=TRUE,
+         smooth=make.panel.svysmooth(dstrat))

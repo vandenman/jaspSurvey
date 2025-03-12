@@ -377,6 +377,38 @@ alphaTable <-  function(surveyDesign, jaspResults, dataset, options) {
 
 # ---- plots ----
 ## ---- ggplot2 ----
+#' Survey histogram
+#'
+#' @param design
+#' @param xName
+#' @param binWidthType
+#' @param numberOfBins
+#' @param density
+#' @param xBreaks
+#' @param yBreaks
+#' @param addRangeFrame
+#'
+#' @returns a ggplot2 object
+#'
+#' @examples
+#' library(survey)
+#' data(api)
+#' dstrat<-svydesign(id=~1,strata=~stype, weights=~pw, data=apistrat, fpc=~fpc)
+#'
+#' ggSvyHist(dstrat, "api99", binWidthType = "sturges")
+#' svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900))
+#'
+#' ggSvyHist(dstrat, "api99", binWidthType = "sturges", density = TRUE)
+#'
+#' svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900))
+#' dens1 <- survey::svysmooth(~api99, dstrat, xlim = c(300, 900))
+#' lines(dens1)
+#'
+#' # note that survey's density estimate may be negative, but we cut it off at 0
+#' svyhist(~api99,design=dstrat, breaks = "sturges", xlim = c(300, 900), ylim = c(-.001, .003))
+#' dens1 <- survey::svysmooth(~api99, dstrat, xlim = c(300, 900))
+#' lines(dens1)
+#' abline(h = 0)
 ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
                       density = FALSE, xBreaks = NULL, yBreaks = NULL,
                       addRangeFrame = TRUE) {
@@ -403,6 +435,23 @@ ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
 
   frame <- if (addRangeFrame) jaspGraphs::geom_rangeframe() else NULL
 
+  densityLine <- NULL
+  if (density) {
+    fromTo <- range(xBreaks)
+    densityEstimate <- survey::svysmooth(str2formula(xName), design, xlim = fromTo)
+
+    densityLine <- jaspGraphs::geom_line(
+      data = data.frame(
+        x = densityEstimate[[xName]][["x"]],
+        y = pmax(0, densityEstimate[[xName]][["y"]])
+      ),
+      mapping = ggplot2::aes(x = x, y = y)
+    )
+    yBreaks <- yBreaks %||% jaspGraphs::getPrettyAxisBreaks(c(0, max(h[[yKey]], densityEstimate[[xName]][["y"]])))
+  } else {
+    yBreaks <- yBreaks %||% jaspGraphs::getPrettyAxisBreaks(c(0, yhigh))
+  }
+
   data.frame(
     x = h[["mids"]],
     y = h[[yKey]]
@@ -417,6 +466,7 @@ ggSvyHist <- function(design, xName, binWidthType = "doane", numberOfBins = NA,
       linewidth = 0.7,
       width    = diff(h[["breaks"]])[1]
     ) +
+    densityLine +
 
     ggplot2::scale_x_continuous(name = xName, breaks = xBreaks, limits = range(xBreaks)) +
     ggplot2::scale_y_continuous(name = yName, breaks = yBreaks, limits = range(yBreaks)) +
@@ -523,13 +573,15 @@ ggSvycoPlot <- function(design, x, y, color = NULL, splitVars = NULL,
 #' svyboxplot(enroll~interaction,dstrat,all.outliers = TRUE) # workaround
 #' ggSvyBoxplot("enroll", dstrat, c("stype", "comp.imp"))
 #'
-ggSvyBoxplot <- function(design, variable, split = NULL, all.outliers = TRUE) {
+ggSvyBoxplot <- function(design, variable, split = NULL, all.outliers = TRUE,
+                         returnDataOnly = FALSE) {
 
   outcome <- str2formula(variable)
   mf <- stats::model.frame(outcome, stats::model.frame(design))
   outcomeValues <- mf[[1]]
 
   outlierGeom <- NULL
+  outlierDf <- data.frame()
   if (!is.null(split)) {
 
     groups <- str2formula(split)
@@ -623,6 +675,9 @@ ggSvyBoxplot <- function(design, variable, split = NULL, all.outliers = TRUE) {
     ymax   = stats[5, ]
   )
 
+  if (returnDataOnly)
+    return(list(boxplotDf = boxplotDf, outlierDf = outlierDf))
+
   ggplot2::ggplot(boxplotDf, ggplot2::aes(x = x)) +
     ggplot2::geom_errorbar(ggplot2::aes(ymin = ymin, ymax = ymax), width = 0.3) +
     ggplot2::geom_boxplot(ggplot2::aes(ymin = ymin, lower = lower, middle = middle, upper = upper, ymax = ymax),
@@ -660,24 +715,34 @@ scatterPlot <- function(surveyDesign, jaspResults, dataset, options) {
       pairName <- sprintf("%s - %s", v1, v2)
       scatterPlotContainer[[pairName]] %setOrRetrieve% {
         # maybe just fix https://github.com/jasp-stats/INTERNAL-jasp/issues/516 for the extra nice syntax?
-        error <- ggplt <- NULL
-        if (isReady(surveyDesign)) {
-          ggplt <- try({
+        # error <- ggplt <- NULL
+        # if (isReady(surveyDesign)) {
+        #   ggplt <- try({
+        #     ggSvycoPlot(
+        #       surveyDesign[["design"]], v1, v2, options[["splitBy"]]
+        #       # TODO: add more options
+        #     )
+        #   })
+        #   if (inherits(plot, "try-error")) {
+        #     error <- .extractErrorMessage(ggplt)
+        #     ggplt <- NULL
+        #   }
+        # }
+        # createJaspPlot(
+        #   title        = sprintf("%s - %s", v1, v2),
+        #   plot         = ggplt,
+        #   dependencies = jaspDeps(optionContainsValue = list(variables = c(v1, v2))),
+        #   error        = error
+        # )
+        createJaspPlot(
+          title        = sprintf("%s - %s", v1, v2),
+          plot         = if (isReady(surveyDesign)) {
             ggSvycoPlot(
               surveyDesign[["design"]], v1, v2, options[["splitBy"]]
               # TODO: add more options
             )
-          })
-          if (inherits(plot, "try-error")) {
-            error <- .extractErrorMessage(ggplt)
-            ggplt <- NULL
-          }
-        }
-        createJaspPlot(
-          title        = sprintf("%s - %s", v1, v2),
-          plot         = ggplt,
-          dependencies = jaspDeps(optionContainsValue = list(variables = c(v1, v2))),
-          error        = error
+          },
+          dependencies = jaspDeps(optionContainsValue = list(variables = c(v1, v2)))
         )
       }
 
@@ -698,19 +763,24 @@ histogramPlot <- function(surveyDesign, jaspResults, dataset, options) {
 
     histogramContainer[[variable]] %setOrRetrieve% {
       # maybe just fix https://github.com/jasp-stats/INTERNAL-jasp/issues/516 for the extra nice syntax?
-      error <- ggplt <- NULL
-      if (isReady(surveyDesign)) {
-        ggplt <- try(ggSvyHist(surveyDesign[["design"]], variable))
-        if (inherits(ggplt, "try-error")) {
-          error <- .extractErrorMessage(ggplt)
-          ggplt <- NULL
-        }
-      }
+      # error <- ggplt <- NULL
+      # if (isReady(surveyDesign)) {
+      #   ggplt <- try(ggSvyHist(surveyDesign[["design"]], variable))
+      #   if (inherits(ggplt, "try-error")) {
+      #     error <- .extractErrorMessage(ggplt)
+      #     ggplt <- NULL
+      #   }
+      # }
+      # createJaspPlot(
+      #   title        = variable,
+      #   plot         = ggplt,
+      #   dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
+      #   error        = error
+      # )
       createJaspPlot(
         title        = variable,
-        plot         = ggplt,
+        plot         = ggSvyHist(surveyDesign[["design"]], variable),
         dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
-        error        = error
       )
     }
   }
@@ -730,25 +800,52 @@ boxPlot <- function(surveyDesign, jaspResults, dataset, options) {
   for (variable in options[["variables"]]) {
 
     boxPlotContainer[[variable]] %setOrRetrieve% {
-      error <- ggplt <- NULL
-      if (isReady(surveyDesign)) {
-        ggplt <- try(ggSvyBoxplot(surveyDesign[["design"]], variable, split = options[["splitBy"]]))
-        if (inherits(ggplt, "try-error")) {
-          error <- .extractErrorMessage(ggplt)
-          ggplt <- NULL
-        }
-      }
+      # error <- ggplt <- NULL
+      # if (isReady(surveyDesign)) {
+      #   ggplt <- try(ggSvyBoxplot(surveyDesign[["design"]], variable, split = options[["splitBy"]]))
+      #   if (inherits(ggplt, "try-error")) {
+      #     error <- .extractErrorMessage(ggplt)
+      #     ggplt <- NULL
+      #   }
+      # }
+      # createJaspPlot(
+      #   title        = variable,
+      #   plot         = ggplt,
+      #   dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
+      #   error        = error
+      # )
       createJaspPlot(
         title        = variable,
-        plot         = ggplt,
+        plot         = ggSvyBoxplot(surveyDesign[["design"]], variable, split = options[["splitBy"]]),
         dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
-        error        = error
       )
     }
   }
 
 }
 
+raincloudPlot <- function(surveyDesign, jaspResults, dataset, options) {
+
+  if (!options[["boxPlots"]])
+    return()
+
+  boxPlotContainer <- jaspResults[["boxPlotContainer"]] %setOrRetrieve%
+    createJaspContainer(title = gettext("Boxplots"),
+                        dependencies = c("boxPlots", "splitBy", setdiff(designDependencies(), "variables")))
+
+  for (variable in options[["variables"]]) {
+
+    boxPlotContainer[[variable]] %setOrRetrieve% {
+
+      createJaspPlot(
+        title        = variable,
+        plot         = ggSvyRaincloudplot(surveyDesign[["design"]], variable, split = options[["splitBy"]]),
+        dependencies = jaspDeps(optionContainsValue = list(variables = variable)),
+      )
+    }
+  }
+
+}
 
 # ---- helpers ----
 str2formula <- function(x) {
